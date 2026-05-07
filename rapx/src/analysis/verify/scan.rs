@@ -171,7 +171,7 @@ fn generate_contract_from_contract_entries<'tcx>(
             arg_idx
         } else {
             rap_error!(
-                "JSON Contract Error: First argument must be an arg index number, got {}",
+                "JSON Contract Error: First argument must be a valid numeric arg index, got {}",
                 entry.args[0]
             );
             continue;
@@ -263,9 +263,9 @@ fn generate_requires_from_annotation_without_field_types<'tcx>(
         for par in safety_attr.iter() {
             for property in par.tags.iter() {
                 let tag_name = property.tag.name();
-                let exprs = property.args.clone().into_vec();
-                let contract = PropertyContract::new(tcx, def_id, tag_name, &exprs);
-                let (local, fields_with_ty) = parse_contract_target(tcx, def_id, exprs);
+                let property_args = property.args.clone().into_vec();
+                let contract = PropertyContract::new(tcx, def_id, tag_name, &property_args);
+                let (local, fields_with_ty) = parse_contract_target(tcx, def_id, property_args);
                 let fields = fields_with_ty
                     .into_iter()
                     .map(|(field_idx, _)| field_idx)
