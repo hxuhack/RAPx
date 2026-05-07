@@ -5,7 +5,6 @@ use crate::analysis::{
 };
 use crate::def_id::*;
 use crate::{rap_debug, rap_warn};
-use regex::Regex;
 use rustc_ast::ItemKind;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::{
@@ -29,7 +28,6 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
-    sync::OnceLock,
 };
 use syn::Expr;
 
@@ -688,20 +686,12 @@ pub fn generate_contract_from_std_annotation_json(
     tcx: TyCtxt<'_>,
     def_id: DefId,
 ) -> Vec<(usize, Vec<usize>, PropertyContract<'_>)> {
-    let std_contracts = get_std_contracts(tcx, def_id);
-    generate_contract_from_contract_entries(tcx, def_id, &std_contracts)
-}
-
-pub fn generate_contract_from_contract_entries<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    def_id: DefId,
-    contract_entries: &[ContractEntry],
-) -> Vec<(usize, Vec<usize>, PropertyContract<'tcx>)> {
     let mut results = Vec::new();
+    let std_contracts = get_std_contracts(tcx, def_id);
 
-    for entry in contract_entries {
-        let tag_name = &entry.tag;
-        let raw_args = &entry.args;
+    for entry in std_contracts {
+        let tag_name = entry.tag;
+        let raw_args = entry.args;
 
         if raw_args.is_empty() {
             continue;
@@ -719,7 +709,7 @@ pub fn generate_contract_from_contract_entries<'tcx>(
         };
 
         let mut exprs: Vec<Expr> = Vec::new();
-        for arg_str in raw_args {
+        for arg_str in &raw_args {
             match syn::parse_str::<Expr>(arg_str) {
                 Ok(expr) => exprs.push(expr),
                 Err(_) => {
@@ -741,7 +731,7 @@ pub fn generate_contract_from_contract_entries<'tcx>(
             continue;
         }
         let fields: Vec<usize> = Vec::new();
-        let contract = PropertyContract::new(tcx, def_id, tag_name.as_str(), &exprs);
+        let contract = PropertyContract::new(tcx, def_id, &tag_name, &exprs);
         results.push((local_id, fields, contract));
     }
 
@@ -766,81 +756,6 @@ pub fn generate_contract_from_annotation_without_field_types(
             (local_id, fields, contract)
         })
         .collect()
-}
-
-fn is_rapx_tool_attr(attr: &Attribute) -> bool {
-    if let Attribute::Unparsed(tool_attr) = attr
-        && let Some(first_seg) = tool_attr.path.segments.first()
-    {
-        return first_seg.as_str() == "rapx";
-    }
-    false
-}
-
-fn is_rapx_requires_attr(attr: &Attribute) -> bool {
-    if let Attribute::Unparsed(tool_attr) = attr {
-        return tool_attr.path.segments.len() == 2
-            && tool_attr.path.segments[0].as_str() == "rapx"
-            && tool_attr.path.segments[1].as_str() == "requires";
-    }
-    false
-}
-
-fn is_rapx_inner_attr(attr: &Attribute) -> bool {
-    if let Attribute::Unparsed(tool_attr) = attr {
-        return tool_attr.path.segments.len() == 2
-            && tool_attr.path.segments[0].as_str() == "rapx"
-            && tool_attr.path.segments[1].as_str() == "inner";
-    }
-    false
-}
-
-fn is_legacy_precond_inner_attr(attr: &Attribute, attr_str: &str) -> bool {
-    static PRECOND_KIND_RE: OnceLock<Regex> = OnceLock::new();
-    let precond_kind_re =
-        PRECOND_KIND_RE.get_or_init(|| Regex::new(r#"kind\s*=\s*"precond""#).unwrap());
-    is_rapx_inner_attr(attr) && precond_kind_re.is_match(attr_str)
-}
-
-/// Generate requires contracts from function annotation.
-/// The canonical representation is `#[rapx::requires(...)]`.
-/// Legacy `#[rapx::inner(..., kind = \"precond\")]` is also accepted and normalized.
-pub fn generate_requires_from_annotation_without_field_types(
-    tcx: TyCtxt,
-    def_id: DefId,
-) -> Vec<(usize, Vec<usize>, PropertyContract)> {
-    const RAPX_PROOF_PLACEHOLDER: &str = "#[rapx::proof(proof)]";
-    let mut results = Vec::new();
-
-    for attr in tcx.get_all_attrs(def_id).into_iter() {
-        if !is_rapx_tool_attr(attr) {
-            continue;
-        }
-        let attr_str = rustc_hir_pretty::attribute_to_string(&tcx, attr);
-        if attr_str.contains(RAPX_PROOF_PLACEHOLDER) {
-            continue;
-        }
-        if !is_rapx_requires_attr(attr) && !is_legacy_precond_inner_attr(attr, attr_str.as_str()) {
-            continue;
-        }
-
-        let safety_attr = safety_parser::safety::parse_attr_and_get_properties(attr_str.as_str());
-        for par in safety_attr.iter() {
-            for property in par.tags.iter() {
-                let tag_name = property.tag.name();
-                let exprs = property.args.clone().into_vec();
-                let contract = PropertyContract::new(tcx, def_id, tag_name, &exprs);
-                let (local, fields_with_ty) = parse_contract_target(tcx, def_id, exprs);
-                let fields = fields_with_ty
-                    .into_iter()
-                    .map(|(field_idx, _)| field_idx)
-                    .collect();
-                results.push((local, fields, contract));
-            }
-        }
-    }
-
-    results
 }
 
 /// Filter the function which contains "rapx::proof"

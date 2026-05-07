@@ -1,12 +1,11 @@
 use crate::analysis::Analysis;
 use crate::analysis::senryx::contract::PropertyContract;
 use crate::analysis::utils::fn_info::{
-    ContractEntry, generate_contract_from_contract_entries,
-    generate_requires_from_annotation_without_field_types, get_cleaned_def_path_name,
-    get_unsafe_callees,
+    ContractEntry, get_cleaned_def_path_name, get_unsafe_callees, parse_contract_target,
 };
+use regex::Regex;
 use rustc_hir::{
-    BodyId, FnDecl,
+    Attribute, BodyId, FnDecl,
     def_id::{DefId, LocalDefId},
     intravisit::{FnKind, Visitor, walk_fn},
 };
@@ -14,6 +13,7 @@ use rustc_middle::{hir::nested_filter, ty::TyCtxt};
 use rustc_span::{Span, Symbol};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
+use syn::Expr;
 
 pub type RequiresContracts<'tcx> = Vec<(usize, Vec<usize>, PropertyContract<'tcx>)>;
 pub type CalleeRequiresMap<'tcx> = HashMap<DefId, RequiresContracts<'tcx>>;
@@ -154,6 +154,128 @@ impl<'tcx> VerifyTargetsScanner<'tcx> {
     pub fn new(tcx: TyCtxt<'tcx>) -> Self {
         VerifyTargetsScanner { tcx }
     }
+}
+
+fn generate_contract_from_contract_entries<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    def_id: DefId,
+    contract_entries: &[ContractEntry],
+) -> RequiresContracts<'tcx> {
+    let mut results = Vec::new();
+    for entry in contract_entries {
+        if entry.args.is_empty() {
+            continue;
+        }
+
+        let local_id = if let Ok(arg_idx) = entry.args[0].parse::<usize>() {
+            arg_idx
+        } else {
+            rap_error!(
+                "JSON Contract Error: First argument must be a valid numeric arg index, got {}",
+                entry.args[0]
+            );
+            continue;
+        };
+
+        let mut exprs: Vec<Expr> = Vec::new();
+        for arg_str in &entry.args {
+            match syn::parse_str::<Expr>(arg_str) {
+                Ok(expr) => exprs.push(expr),
+                Err(_) => {
+                    rap_error!(
+                        "JSON Contract Error: Failed to parse arg '{}' as Rust Expr for tag {}",
+                        arg_str,
+                        entry.tag
+                    );
+                }
+            }
+        }
+
+        if exprs.len() != entry.args.len() {
+            rap_error!(
+                "Parse std API args error: Failed to parse arg '{:?}'",
+                entry.args
+            );
+            continue;
+        }
+
+        let contract = PropertyContract::new(tcx, def_id, entry.tag.as_str(), &exprs);
+        results.push((local_id, Vec::new(), contract));
+    }
+    results
+}
+
+fn is_rapx_tool_attr(attr: &Attribute) -> bool {
+    if let Attribute::Unparsed(tool_attr) = attr
+        && let Some(first_seg) = tool_attr.path.segments.first()
+    {
+        return first_seg.as_str() == "rapx";
+    }
+    false
+}
+
+fn is_rapx_requires_attr(attr: &Attribute) -> bool {
+    if let Attribute::Unparsed(tool_attr) = attr {
+        return tool_attr.path.segments.len() == 2
+            && tool_attr.path.segments[0].as_str() == "rapx"
+            && tool_attr.path.segments[1].as_str() == "requires";
+    }
+    false
+}
+
+fn is_rapx_inner_attr(attr: &Attribute) -> bool {
+    if let Attribute::Unparsed(tool_attr) = attr {
+        return tool_attr.path.segments.len() == 2
+            && tool_attr.path.segments[0].as_str() == "rapx"
+            && tool_attr.path.segments[1].as_str() == "inner";
+    }
+    false
+}
+
+fn is_legacy_precond_inner_attr(attr: &Attribute, attr_str: &str) -> bool {
+    static PRECOND_KIND_RE: OnceLock<Regex> = OnceLock::new();
+    let precond_kind_re =
+        PRECOND_KIND_RE.get_or_init(|| Regex::new(r#"kind\s*=\s*"precond""#).unwrap());
+    is_rapx_inner_attr(attr) && precond_kind_re.is_match(attr_str)
+}
+
+fn generate_requires_from_annotation_without_field_types<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    def_id: DefId,
+) -> RequiresContracts<'tcx> {
+    const RAPX_PROOF_PLACEHOLDER: &str = "#[rapx::proof(proof)]";
+    let mut results = Vec::new();
+
+    for attr in tcx.get_all_attrs(def_id).into_iter() {
+        if !is_rapx_tool_attr(attr) {
+            continue;
+        }
+
+        let attr_str = rustc_hir_pretty::attribute_to_string(&tcx, attr);
+        if attr_str.contains(RAPX_PROOF_PLACEHOLDER) {
+            continue;
+        }
+        if !is_rapx_requires_attr(attr) && !is_legacy_precond_inner_attr(attr, attr_str.as_str()) {
+            continue;
+        }
+
+        let safety_attr = safety_parser::safety::parse_attr_and_get_properties(attr_str.as_str());
+        for par in safety_attr.iter() {
+            for property in par.tags.iter() {
+                let tag_name = property.tag.name();
+                let property_args = property.args.clone().into_vec();
+                let contract = PropertyContract::new(tcx, def_id, tag_name, &property_args);
+                let (local, fields_with_ty) = parse_contract_target(tcx, def_id, property_args);
+                let fields = fields_with_ty
+                    .into_iter()
+                    .map(|(field_idx, _)| field_idx)
+                    .collect();
+                results.push((local, fields, contract));
+            }
+        }
+    }
+
+    results
 }
 
 fn get_verify_std_contracts_json() -> &'static HashMap<String, Vec<ContractEntry>> {
