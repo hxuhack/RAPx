@@ -686,12 +686,20 @@ pub fn generate_contract_from_std_annotation_json(
     tcx: TyCtxt<'_>,
     def_id: DefId,
 ) -> Vec<(usize, Vec<usize>, PropertyContract<'_>)> {
-    let mut results = Vec::new();
     let std_contracts = get_std_contracts(tcx, def_id);
+    generate_contract_from_contract_entries(tcx, def_id, &std_contracts)
+}
 
-    for entry in std_contracts {
-        let tag_name = entry.tag;
-        let raw_args = entry.args;
+pub fn generate_contract_from_contract_entries<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    def_id: DefId,
+    contract_entries: &[ContractEntry],
+) -> Vec<(usize, Vec<usize>, PropertyContract<'tcx>)> {
+    let mut results = Vec::new();
+
+    for entry in contract_entries {
+        let tag_name = &entry.tag;
+        let raw_args = &entry.args;
 
         if raw_args.is_empty() {
             continue;
@@ -709,7 +717,7 @@ pub fn generate_contract_from_std_annotation_json(
         };
 
         let mut exprs: Vec<Expr> = Vec::new();
-        for arg_str in &raw_args {
+        for arg_str in raw_args {
             match syn::parse_str::<Expr>(arg_str) {
                 Ok(expr) => exprs.push(expr),
                 Err(_) => {
@@ -731,7 +739,7 @@ pub fn generate_contract_from_std_annotation_json(
             continue;
         }
         let fields: Vec<usize> = Vec::new();
-        let contract = PropertyContract::new(tcx, def_id, &tag_name, &exprs);
+        let contract = PropertyContract::new(tcx, def_id, tag_name.as_str(), &exprs);
         results.push((local_id, fields, contract));
     }
 
@@ -756,6 +764,69 @@ pub fn generate_contract_from_annotation_without_field_types(
             (local_id, fields, contract)
         })
         .collect()
+}
+
+fn is_rapx_tool_attr(attr: &Attribute) -> bool {
+    if let Attribute::Unparsed(tool_attr) = attr
+        && let Some(first_seg) = tool_attr.path.segments.first()
+    {
+        return first_seg.as_str() == "rapx";
+    }
+    false
+}
+
+fn is_rapx_requires_attr(attr: &Attribute) -> bool {
+    if let Attribute::Unparsed(tool_attr) = attr {
+        return tool_attr.path.segments.len() == 2
+            && tool_attr.path.segments[0].as_str() == "rapx"
+            && tool_attr.path.segments[1].as_str() == "requires";
+    }
+    false
+}
+
+fn is_legacy_precond_inner_attr(attr_str: &str) -> bool {
+    attr_str.contains("#[rapx::inner(")
+        && (attr_str.contains("kind = \"precond\"") || attr_str.contains("kind=\"precond\""))
+}
+
+/// Generate requires contracts from function annotation.
+/// The canonical representation is `#[rapx::requires(...)]`.
+/// Legacy `#[rapx::inner(..., kind = \"precond\")]` is also accepted and normalized.
+pub fn generate_requires_from_annotation_without_field_types(
+    tcx: TyCtxt,
+    def_id: DefId,
+) -> Vec<(usize, Vec<usize>, PropertyContract)> {
+    let mut results = Vec::new();
+
+    for attr in tcx.get_all_attrs(def_id).into_iter() {
+        if !is_rapx_tool_attr(attr) {
+            continue;
+        }
+        let attr_str = rustc_hir_pretty::attribute_to_string(&tcx, attr);
+        if attr_str.contains("#[rapx::proof(proof)]") {
+            continue;
+        }
+        if !is_rapx_requires_attr(attr) && !is_legacy_precond_inner_attr(attr_str.as_str()) {
+            continue;
+        }
+
+        let safety_attr = safety_parser::safety::parse_attr_and_get_properties(attr_str.as_str());
+        for par in safety_attr.iter() {
+            for property in par.tags.iter() {
+                let tag_name = property.tag.name();
+                let exprs = property.args.clone().into_vec();
+                let contract = PropertyContract::new(tcx, def_id, tag_name, &exprs);
+                let (local, fields_with_ty) = parse_contract_target(tcx, def_id, exprs);
+                let fields = fields_with_ty
+                    .into_iter()
+                    .map(|(field_idx, _)| field_idx)
+                    .collect();
+                results.push((local, fields, contract));
+            }
+        }
+    }
+
+    results
 }
 
 /// Filter the function which contains "rapx::proof"
