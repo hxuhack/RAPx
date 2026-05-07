@@ -44,10 +44,9 @@ impl<'tcx> VerifyAttrCollector<'tcx> {
     }
 
     fn get_requires_for_unsafe_callee(&self, callee_def_id: DefId) -> RequiresContracts<'tcx> {
-        let mut requires =
-            generate_requires_from_annotation_without_field_types(self.tcx, callee_def_id);
+        let mut requires = get_contract_from_annotation(self.tcx, callee_def_id);
         if requires.is_empty() && self.is_std_crate_def_id(callee_def_id) {
-            requires = generate_contract_from_contract_entries(
+            requires = get_contract_from_entry(
                 self.tcx,
                 callee_def_id,
                 get_std_backup_contracts(self.tcx, callee_def_id),
@@ -190,7 +189,7 @@ impl<'tcx> VerifyTargetsCollector<'tcx> {
     }
 }
 
-fn generate_contract_from_contract_entries<'tcx>(
+fn get_contract_from_entry<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     contract_entries: &[ContractEntry],
@@ -273,7 +272,7 @@ fn is_legacy_precond_inner_attr(attr: &Attribute, attr_str: &str) -> bool {
     is_rapx_inner_attr(attr) && precond_kind_re.is_match(attr_str)
 }
 
-fn generate_requires_from_annotation_without_field_types<'tcx>(
+fn get_contract_from_annotation<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
 ) -> RequiresContracts<'tcx> {
