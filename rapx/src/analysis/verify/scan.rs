@@ -162,7 +162,7 @@ fn get_verify_std_contracts_json() -> &'static HashMap<String, Vec<ContractEntry
         let raw = include_str!("assets/std-contracts.json");
         let normalized = normalize_json_trailing_commas(raw);
         serde_json::from_str(normalized.as_str())
-            .expect("failed to parse verify std contracts backup")
+            .unwrap_or_else(|err| panic!("failed to parse verify std contracts backup: {err}"))
     })
 }
 
@@ -175,24 +175,26 @@ fn get_std_backup_contracts(tcx: TyCtxt<'_>, def_id: DefId) -> &'static [Contrac
 }
 
 fn normalize_json_trailing_commas(input: &str) -> String {
-    let chars = input.chars().collect::<Vec<_>>();
     let mut normalized = String::with_capacity(input.len());
-    let mut i = 0;
+    let mut iter = input.char_indices().peekable();
 
-    while i < chars.len() {
-        let ch = chars[i];
+    while let Some((_, ch)) = iter.next() {
         if ch == ',' {
-            let mut j = i + 1;
-            while j < chars.len() && chars[j].is_whitespace() {
-                j += 1;
+            let mut lookahead = iter.clone();
+            while let Some((_, next_ch)) = lookahead.peek() {
+                if next_ch.is_whitespace() {
+                    lookahead.next();
+                } else {
+                    break;
+                }
             }
-            if j < chars.len() && (chars[j] == '}' || chars[j] == ']') {
-                i += 1;
+            if let Some((_, next_ch)) = lookahead.peek()
+                && (*next_ch == '}' || *next_ch == ']')
+            {
                 continue;
             }
         }
         normalized.push(ch);
-        i += 1;
     }
 
     normalized

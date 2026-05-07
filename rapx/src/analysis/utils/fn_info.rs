@@ -5,6 +5,7 @@ use crate::analysis::{
 };
 use crate::def_id::*;
 use crate::{rap_debug, rap_warn};
+use regex::Regex;
 use rustc_ast::ItemKind;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::{
@@ -28,6 +29,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
+    sync::OnceLock,
 };
 use syn::Expr;
 
@@ -784,9 +786,20 @@ fn is_rapx_requires_attr(attr: &Attribute) -> bool {
     false
 }
 
-fn is_legacy_precond_inner_attr(attr_str: &str) -> bool {
-    attr_str.contains("#[rapx::inner(")
-        && (attr_str.contains("kind = \"precond\"") || attr_str.contains("kind=\"precond\""))
+fn is_rapx_inner_attr(attr: &Attribute) -> bool {
+    if let Attribute::Unparsed(tool_attr) = attr {
+        return tool_attr.path.segments.len() == 2
+            && tool_attr.path.segments[0].as_str() == "rapx"
+            && tool_attr.path.segments[1].as_str() == "inner";
+    }
+    false
+}
+
+fn is_legacy_precond_inner_attr(attr: &Attribute, attr_str: &str) -> bool {
+    static PRECOND_KIND_RE: OnceLock<Regex> = OnceLock::new();
+    let precond_kind_re =
+        PRECOND_KIND_RE.get_or_init(|| Regex::new(r#"kind\s*=\s*"precond""#).unwrap());
+    is_rapx_inner_attr(attr) && precond_kind_re.is_match(attr_str)
 }
 
 /// Generate requires contracts from function annotation.
@@ -796,6 +809,7 @@ pub fn generate_requires_from_annotation_without_field_types(
     tcx: TyCtxt,
     def_id: DefId,
 ) -> Vec<(usize, Vec<usize>, PropertyContract)> {
+    const RAPX_PROOF_PLACEHOLDER: &str = "#[rapx::proof(proof)]";
     let mut results = Vec::new();
 
     for attr in tcx.get_all_attrs(def_id).into_iter() {
@@ -803,10 +817,10 @@ pub fn generate_requires_from_annotation_without_field_types(
             continue;
         }
         let attr_str = rustc_hir_pretty::attribute_to_string(&tcx, attr);
-        if attr_str.contains("#[rapx::proof(proof)]") {
+        if attr_str.contains(RAPX_PROOF_PLACEHOLDER) {
             continue;
         }
-        if !is_rapx_requires_attr(attr) && !is_legacy_precond_inner_attr(attr_str.as_str()) {
+        if !is_rapx_requires_attr(attr) && !is_legacy_precond_inner_attr(attr, attr_str.as_str()) {
             continue;
         }
 
