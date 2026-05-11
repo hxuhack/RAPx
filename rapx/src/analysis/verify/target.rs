@@ -19,7 +19,7 @@ use contract::{ContractEntry, PropertyContract};
 use helpers::{get_cleaned_def_path_name, get_unsafe_callees, parse_contract_target};
 
 /// A parsed `requires` contract attached to a callee.
-pub struct RequiresContract<'tcx> {
+pub struct FnContract<'tcx> {
     /// The local argument index targeted by the contract.
     pub local: usize,
     /// The accessed field path, or empty when the whole argument is targeted.
@@ -29,10 +29,10 @@ pub struct RequiresContract<'tcx> {
 }
 
 /// A list of parsed `requires` contracts.
-pub type RequiresContracts<'tcx> = Vec<RequiresContract<'tcx>>;
+pub type FnContracts<'tcx> = Vec<FnContract<'tcx>>;
 
 /// Maps a callee `DefId` to all of its collected `requires` contracts.
-pub type CalleeRequiresMap<'tcx> = HashMap<DefId, RequiresContracts<'tcx>>;
+pub type CalleeRequiresMap<'tcx> = HashMap<DefId, FnContracts<'tcx>>;
 
 /// Visitor that collects functions annotated with `#[rapx::verify]`.
 pub struct VerifyAttrCollector<'tcx> {
@@ -69,7 +69,7 @@ impl<'tcx> VerifyAttrCollector<'tcx> {
     /// The collector first tries inline RAPx annotations. If none are found and
     /// the callee belongs to the standard library, it falls back to the backup
     /// JSON database bundled with the verify analysis.
-    fn get_requires_for_unsafe_callee(&self, callee_def_id: DefId) -> RequiresContracts<'tcx> {
+    fn get_requires_for_unsafe_callee(&self, callee_def_id: DefId) -> FnContracts<'tcx> {
         let mut requires = get_contract_from_annotation(self.tcx, callee_def_id);
         if requires.is_empty() && self.is_std_crate_def_id(callee_def_id) {
             requires = get_contract_from_entry(
@@ -231,7 +231,7 @@ fn get_contract_from_entry<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     contract_entries: &[ContractEntry],
-) -> RequiresContracts<'tcx> {
+) -> FnContracts<'tcx> {
     let mut results = Vec::new();
     for entry in contract_entries {
         if entry.args.is_empty() {
@@ -271,7 +271,7 @@ fn get_contract_from_entry<'tcx>(
         }
 
         let contract = PropertyContract::new(tcx, def_id, entry.tag.as_str(), &exprs);
-        results.push(RequiresContract {
+        results.push(FnContract {
             local: local_id,
             fields: Vec::new(),
             contract,
@@ -304,7 +304,7 @@ fn is_rapx_requires_attr(attr: &Attribute) -> bool {
 fn get_contract_from_annotation<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-) -> RequiresContracts<'tcx> {
+) -> FnContracts<'tcx> {
     let mut results = Vec::new();
 
     for attr in tcx.get_all_attrs(def_id).into_iter() {
@@ -325,7 +325,7 @@ fn get_contract_from_annotation<'tcx>(
                     .into_iter()
                     .map(|(field_idx, _)| field_idx)
                     .collect();
-                results.push(RequiresContract {
+                results.push(FnContract {
                     local,
                     fields,
                     contract,

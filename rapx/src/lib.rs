@@ -36,7 +36,7 @@ use crate::{
     analysis::{
         core::{alias_analysis::mfp::MfpAliasAnalyzer, api_dependency},
         scan::ScanAnalysis,
-        verify::collect::VerifyTargetsCollector,
+        verify::target::VerifyTargetsCollector,
     },
     cli::{AliasStrategyKind, AnalysisKind, Commands, OptLevel, RapxArgs, VerifyArgs},
 };
