@@ -213,7 +213,9 @@ impl<'tcx> VerifyTargetsCollector<'tcx> {
 
 /// Builds contracts from backup JSON entries.
 ///
-/// Each entry stores expression arguments needed to construct a `Property`.
+/// Each entry stores property-expression arguments that are passed directly into
+/// `Property::new`. The target information is resolved by `Property` itself
+/// from those arguments.
 fn get_contract_from_entry<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
