@@ -291,7 +291,7 @@ impl<'tcx> Property<'tcx> {
                     vec![target, PropertyArg::Ty(ty), PropertyArg::Expr(length)],
                 )
             }
-            "InBound" | "InBounded" => match exprs.as_slice() {
+            "InBound" | "InBounded" => match exprs {
                 [_target, ty_expr, len_expr] => {
                     let target = Self::parse_target_arg(tcx, def_id, &exprs[0]);
                     let ty = Self::parse_type(tcx, def_id, ty_expr, "InBound");
@@ -389,7 +389,11 @@ impl<'tcx> Property<'tcx> {
     pub fn new_obj_boundary(ty: Ty<'tcx>, len: ContractExpr<'tcx>) -> Self {
         Self::new_with_args(
             PropertyKind::InBound,
-            vec![PropertyArg::Ty(ty), PropertyArg::Expr(len)],
+            vec![
+                PropertyArg::Expr(ContractExpr::Unknown),
+                PropertyArg::Ty(ty),
+                PropertyArg::Expr(len),
+            ],
         )
     }
 
@@ -407,8 +411,7 @@ impl<'tcx> Property<'tcx> {
     fn new_with_target(kind: PropertyKind, tcx: TyCtxt<'tcx>, def_id: DefId, exprs: &[Expr]) -> Self {
         let args = exprs
             .first()
-            .and_then(|expr| Self::parse_contract_place(tcx, def_id, expr))
-            .map(PropertyArg::Place)
+            .map(|expr| Self::parse_target_arg(tcx, def_id, expr))
             .into_iter()
             .collect();
         Self { kind, args }
@@ -536,7 +539,7 @@ impl<'tcx> Property<'tcx> {
         def_id: DefId,
         exprs: &[Expr],
     ) -> Vec<NumericPredicate<'tcx>> {
-        match exprs.as_slice() {
+        match exprs {
             [] => Vec::new(),
             [expr] => Self::parse_numeric_predicate(tcx, def_id, expr)
                 .into_iter()
