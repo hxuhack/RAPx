@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use syn::Expr;
 
-use contract::{ContractEntry, PropertyContract};
+use contract::{ContractEntry, Property};
 use helpers::{get_cleaned_def_path_name, get_unsafe_callees, parse_contract_target};
 
 /// A parsed `requires` contract attached to a callee.
@@ -24,8 +24,8 @@ pub struct FnContract<'tcx> {
     pub local: usize,
     /// The accessed field path, or empty when the whole argument is targeted.
     pub fields: Vec<usize>,
-    /// The parsed property contract payload.
-    pub contract: PropertyContract<'tcx>,
+    /// The parsed property payload.
+    pub property: Property<'tcx>,
 }
 
 /// A list of parsed `requires` contracts.
@@ -189,7 +189,7 @@ impl<'tcx> Analysis for VerifyTargetsCollector<'tcx> {
                                         "    safety contract: local={}, fields={:?}, {:?}",
                                         requires_contract.local,
                                         requires_contract.fields,
-                                        requires_contract.contract
+                                        requires_contract.property
                                     );
                                 }
                             }
@@ -226,7 +226,7 @@ impl<'tcx> VerifyTargetsCollector<'tcx> {
 ///
 /// Each entry is expected to store its first argument as the numeric target
 /// argument index, followed by the expression arguments needed to construct a
-/// `PropertyContract`.
+/// `Property`.
 fn get_contract_from_entry<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
@@ -270,11 +270,11 @@ fn get_contract_from_entry<'tcx>(
             continue;
         }
 
-        let contract = PropertyContract::new(tcx, def_id, entry.tag.as_str(), &exprs);
+        let property = Property::new(tcx, def_id, entry.tag.as_str(), &exprs);
         results.push(FnContract {
             local: local_id,
             fields: Vec::new(),
-            contract,
+            property,
         });
     }
     results
@@ -318,7 +318,7 @@ fn get_contract_from_annotation<'tcx>(
             for property in par.tags.iter() {
                 let tag_name = property.tag.name();
                 let property_args = property.args.clone().into_vec();
-                let contract = PropertyContract::new(tcx, def_id, tag_name, &property_args);
+                let property = Property::new(tcx, def_id, tag_name, &property_args);
                 let (local, fields_with_ty): (usize, Vec<(usize, rustc_middle::ty::Ty<'tcx>)>) =
                     parse_contract_target(tcx, def_id, property_args);
                 let fields: Vec<usize> = fields_with_ty
@@ -328,7 +328,7 @@ fn get_contract_from_annotation<'tcx>(
                 results.push(FnContract {
                     local,
                     fields,
-                    contract,
+                    property,
                 });
             }
         }
