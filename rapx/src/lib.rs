@@ -292,8 +292,8 @@ pub fn start_analyzer(tcx: TyCtxt, callback: &RapCallback) {
             }
         },
 
-        Commands::Verify(VerifyArgs { collect }) => {
-            if *collect {
+        Commands::Verify(VerifyArgs { identify_targets }) => {
+            if *identify_targets {
                 VerifyTargetsCollector::new(tcx).run();
             }
         }

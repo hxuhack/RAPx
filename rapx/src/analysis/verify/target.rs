@@ -16,20 +16,10 @@ use std::sync::OnceLock;
 use syn::Expr;
 
 use contract::{ContractEntry, Property};
-use helpers::{get_cleaned_def_path_name, get_unsafe_callees, parse_contract_target};
-
-/// A parsed `requires` contract attached to a callee.
-pub struct FnContract<'tcx> {
-    /// The local argument index targeted by the contract.
-    pub local: usize,
-    /// The accessed field path, or empty when the whole argument is targeted.
-    pub fields: Vec<usize>,
-    /// The parsed property payload.
-    pub property: Property<'tcx>,
-}
+use helpers::{get_cleaned_def_path_name, get_unsafe_callees};
 
 /// A list of parsed `requires` contracts.
-pub type FnContracts<'tcx> = Vec<FnContract<'tcx>>;
+pub type FnContracts<'tcx> = Vec<Property<'tcx>>;
 
 /// Maps a callee `DefId` to all of its collected `requires` contracts.
 pub type CalleeRequiresMap<'tcx> = HashMap<DefId, FnContracts<'tcx>>;
@@ -148,19 +138,19 @@ pub struct VerifyTargetsCollector<'tcx> {
 
 impl<'tcx> Analysis for VerifyTargetsCollector<'tcx> {
     fn name(&self) -> &'static str {
-        "Verify Collect Analysis"
+        "Verify Identify Targets Analysis"
     }
 
     /// Runs the collection pass and logs targets, unsafe callees, and contracts.
     fn run(&mut self) {
-        rap_info!("======== #[rapx::verify] collect ========");
+        rap_info!("======== #[rapx::verify] identify targets ========");
         let mut collector = VerifyAttrCollector::new(self.tcx);
         self.tcx.hir_visit_all_item_likes_in_crate(&mut collector);
 
         for target_def_id in &collector.targets {
             let target_path = self.tcx.def_path_str(*target_def_id);
             rap_info!(
-                "[rapx::verify::collect] target: {} (DefId: {:?})",
+                "[rapx::verify::identify-targets] target: {} (DefId: {:?})",
                 target_path,
                 target_def_id
             );
@@ -184,12 +174,11 @@ impl<'tcx> Analysis for VerifyTargetsCollector<'tcx> {
                             .and_then(|callee_map| callee_map.get(&unsafe_callee_def_id))
                         {
                             Some(requires) if !requires.is_empty() => {
-                                for requires_contract in requires {
+                                for property in requires {
                                     rap_info!(
-                                        "    safety contract: local={}, fields={:?}, {:?}",
-                                        requires_contract.local,
-                                        requires_contract.fields,
-                                        requires_contract.property
+                                        "    safety contract: kind={:?}, args={:?}",
+                                        property.kind,
+                                        property.args
                                     );
                                 }
                             }
@@ -224,9 +213,7 @@ impl<'tcx> VerifyTargetsCollector<'tcx> {
 
 /// Builds contracts from backup JSON entries.
 ///
-/// Each entry is expected to store its first argument as the numeric target
-/// argument index, followed by the expression arguments needed to construct a
-/// `Property`.
+/// Each entry stores expression arguments needed to construct a `Property`.
 fn get_contract_from_entry<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
@@ -237,16 +224,6 @@ fn get_contract_from_entry<'tcx>(
         if entry.args.is_empty() {
             continue;
         }
-
-        let local_id = if let Ok(arg_idx) = entry.args[0].parse::<usize>() {
-            arg_idx
-        } else {
-            rap_error!(
-                "JSON Contract Error: First argument must be a valid numeric arg index, got {}",
-                entry.args[0]
-            );
-            continue;
-        };
 
         let mut exprs: Vec<Expr> = Vec::new();
         for arg_str in &entry.args {
@@ -271,11 +248,7 @@ fn get_contract_from_entry<'tcx>(
         }
 
         let property = Property::new(tcx, def_id, entry.tag.as_str(), &exprs);
-        results.push(FnContract {
-            local: local_id,
-            fields: Vec::new(),
-            property,
-        });
+        results.push(property);
     }
     results
 }
@@ -319,17 +292,7 @@ fn get_contract_from_annotation<'tcx>(
                 let tag_name = property.tag.name();
                 let property_args = property.args.clone().into_vec();
                 let property = Property::new(tcx, def_id, tag_name, &property_args);
-                let (local, fields_with_ty): (usize, Vec<(usize, rustc_middle::ty::Ty<'tcx>)>) =
-                    parse_contract_target(tcx, def_id, property_args);
-                let fields: Vec<usize> = fields_with_ty
-                    .into_iter()
-                    .map(|(field_idx, _)| field_idx)
-                    .collect();
-                results.push(FnContract {
-                    local,
-                    fields,
-                    property,
-                });
+                results.push(property);
             }
         }
     }
