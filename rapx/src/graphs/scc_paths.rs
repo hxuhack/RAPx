@@ -114,6 +114,142 @@ pub fn rebuild_segment_stack(path: &[usize], start: usize) -> FxHashSet<usize> {
     segment_stack
 }
 
+/// Traversal state for SCC path enumeration in an SCC tree.
+///
+/// This struct is graph-layer state only: it tracks path/segment/cycle bookkeeping
+/// and intentionally does not include analysis-specific branch semantics.
+#[derive(Clone, Debug)]
+pub struct SccPathTraversalState {
+    pub start: usize,
+    pub cur: usize,
+    pub path: Vec<usize>,
+    pub segment_stack: FxHashSet<usize>,
+    pub visited_since_enter: FxHashSet<usize>,
+    pub baseline_at_dominator: FxHashSet<usize>,
+    pub skip_child_enter: Option<usize>,
+}
+
+impl SccPathTraversalState {
+    /// Create a traversal state rooted at an SCC dominator/entry `start`.
+    pub fn new(start: usize) -> Self {
+        let mut segment_stack = FxHashSet::default();
+        segment_stack.insert(start);
+
+        let mut visited_since_enter = FxHashSet::default();
+        visited_since_enter.insert(start);
+
+        Self {
+            start,
+            cur: start,
+            path: vec![start],
+            segment_stack,
+            baseline_at_dominator: visited_since_enter.clone(),
+            visited_since_enter,
+            skip_child_enter: None,
+        }
+    }
+
+    /// Return true if the current node belongs to the SCC being enumerated.
+    pub fn is_cur_in_scc(&self, scc: &SccInfo) -> bool {
+        node_is_in_current_scc(self.start, scc, self.cur)
+    }
+
+    /// Return true if `node` belongs to the SCC being enumerated.
+    pub fn is_node_in_scc(&self, scc: &SccInfo, node: usize) -> bool {
+        node_is_in_current_scc(self.start, scc, node)
+    }
+
+    /// Return true if traversal should stop because path explosion guards are hit.
+    pub fn exceeds_complexity_limits(
+        &self,
+        max_path_len: usize,
+        max_seen_paths: usize,
+        seen_paths_len: usize,
+    ) -> bool {
+        self.path.len() > max_path_len || seen_paths_len > max_seen_paths
+    }
+
+    /// Apply dominator-boundary cycle policy for the current node.
+    ///
+    /// Returns `false` when the cycle ending at dominator introduces no new nodes
+    /// and should be pruned.
+    pub fn prepare_for_current_node(&mut self) -> bool {
+        if self.cur != self.start {
+            return true;
+        }
+
+        if self.path.len() > 1 {
+            // Find previous occurrence of `start` before the trailing `start`.
+            let prev_start_pos = self.path[..self.path.len() - 1]
+                .iter()
+                .rposition(|&node| node == self.start)
+                .unwrap_or(0);
+            // Nodes in the cycle segment exclude both dominator endpoints.
+            let cycle_nodes = &self.path[prev_start_pos + 1..self.path.len() - 1];
+            let introduces_new = cycle_nodes
+                .iter()
+                .any(|node| !self.baseline_at_dominator.contains(node));
+            if !introduces_new {
+                return false;
+            }
+        }
+
+        // At dominator boundary, reset baseline and segment recursion stack.
+        self.baseline_at_dominator = self.visited_since_enter.clone();
+        self.segment_stack.clear();
+        self.segment_stack.insert(self.start);
+        true
+    }
+
+    /// Return true if `next` can be entered under current segment recursion policy.
+    pub fn can_descend_to(&self, next: usize) -> bool {
+        !self.segment_stack.contains(&next) || next == self.start
+    }
+
+    /// Return a new traversal state after descending one edge to `next`.
+    pub fn descend_to(&self, next: usize) -> Self {
+        let mut next_state = self.clone();
+        next_state.cur = next;
+        next_state.path.push(next);
+        next_state.segment_stack.insert(next);
+        next_state.visited_since_enter.insert(next);
+        next_state.skip_child_enter = None;
+        next_state
+    }
+
+    /// Return a copy with a child-enter skip marker for parent-level continuation.
+    pub fn with_skip_child_enter(&self, child_enter: usize) -> Self {
+        let mut next_state = self.clone();
+        next_state.skip_child_enter = Some(child_enter);
+        next_state
+    }
+
+    /// Build a new state after splicing a nested SCC path into the current path.
+    pub fn with_spliced_path(
+        &self,
+        spliced_path: Vec<usize>,
+        skip_child_enter: Option<usize>,
+    ) -> Self {
+        let mut visited_since_enter = self.visited_since_enter.clone();
+        for node in &spliced_path {
+            visited_since_enter.insert(*node);
+        }
+
+        let cur = *spliced_path.last().unwrap_or(&self.cur);
+        let segment_stack = rebuild_segment_stack(&spliced_path, self.start);
+
+        Self {
+            start: self.start,
+            cur,
+            path: spliced_path,
+            segment_stack,
+            visited_since_enter,
+            baseline_at_dominator: self.baseline_at_dominator.clone(),
+            skip_child_enter,
+        }
+    }
+}
+
 struct SccComponentCollector {
     successors: Vec<Vec<usize>>,
     components: Vec<Vec<usize>>,
@@ -170,5 +306,14 @@ mod tests {
 
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].0, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn traversal_state_prunes_non_incremental_cycle() {
+        let mut first_cycle = SccPathTraversalState::new(1).descend_to(2).descend_to(1);
+        assert!(first_cycle.prepare_for_current_node());
+
+        let mut repeated_cycle = first_cycle.descend_to(2).descend_to(1);
+        assert!(!repeated_cycle.prepare_for_current_node());
     }
 }
