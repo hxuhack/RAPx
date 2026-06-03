@@ -16,7 +16,10 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 
 use crate::graphs::{
     scc::{SccInfo, SccTree},
-    scc_paths::build_scc_tree,
+    scc_paths::{
+        PathKey, build_scc_tree, constraints_key, node_is_in_current_scc, rebuild_segment_stack,
+        record_unique_path,
+    },
 };
 
 use super::{block::Term, graph::*, *};
@@ -39,12 +42,6 @@ struct SccPathCacheKey {
     def_id: DefId,
     scc_enter: usize,
     constraints: Vec<(usize, usize)>,
-}
-
-fn constraints_key(constraints: &FxHashMap<usize, usize>) -> Vec<(usize, usize)> {
-    let mut v: Vec<(usize, usize)> = constraints.iter().map(|(k, val)| (*k, *val)).collect();
-    v.sort_unstable();
-    v
 }
 
 struct DepthLimitGuard {
@@ -76,12 +73,6 @@ impl Drop for DepthLimitGuard {
             }
         });
     }
-}
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct PathKey {
-    path: Vec<usize>,
-    constraints: Vec<(usize, usize)>,
 }
 
 impl<'tcx> MopGraph<'tcx> {
@@ -147,14 +138,7 @@ impl<'tcx> MopGraph<'tcx> {
         if !scc.exits.iter().any(|e| e.exit == node) {
             return;
         }
-
-        let key = PathKey {
-            path: cur_path.clone(),
-            constraints: constraints_key(constraints),
-        };
-        if seen_paths.insert(key) {
-            out.push((cur_path.clone(), constraints.clone()));
-        }
+        record_unique_path(cur_path, constraints, out, seen_paths);
     }
 
     fn possible_switch_values_for_constraint_id(&self, discr_local: usize) -> Option<Vec<usize>> {
@@ -506,6 +490,8 @@ impl<'tcx> MopGraph<'tcx> {
     }
 
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccTree {
+        // `node_to_scc` must return the most specific SCC that directly owns `node`
+        // in the current nesting model, so nested SCC trees can be rebuilt correctly.
         build_scc_tree(scc, |node| self.blocks.get(node).map(|block| block.scc.clone()))
     }
 
@@ -591,13 +577,7 @@ impl<'tcx> MopGraph<'tcx> {
         };
         let scc = &scc_tree.scc;
         if scc.nodes.is_empty() {
-            let key = PathKey {
-                path: path.clone(),
-                constraints: constraints_key(&path_constraints),
-            };
-            if seen_paths.insert(key) {
-                paths_in_scc.push((path.clone(), path_constraints));
-            }
+            record_unique_path(path, &path_constraints, paths_in_scc, seen_paths);
             return;
         }
 
@@ -610,7 +590,7 @@ impl<'tcx> MopGraph<'tcx> {
         // We do not traverse outside the SCC when generating SCC internal paths.
         // Instead, we record paths that end at SCC-exit nodes (nodes with an outgoing edge leaving
         // the SCC), and the caller is responsible for resuming traversal outside the SCC.
-        let cur_in_scc = cur == start || scc.nodes.contains(&cur);
+        let cur_in_scc = node_is_in_current_scc(start, scc, cur);
         if !cur_in_scc {
             return;
         }
@@ -715,14 +695,7 @@ impl<'tcx> MopGraph<'tcx> {
 
                     // Rebuild segment stack from the suffix of the path after the most recent
                     // dominator occurrence.
-                    let last_start_pos = new_path
-                        .iter()
-                        .rposition(|&node| node == start)
-                        .unwrap_or(0);
-                    let mut new_segment_stack = FxHashSet::default();
-                    for node in &new_path[last_start_pos..] {
-                        new_segment_stack.insert(*node);
-                    }
+                    let new_segment_stack = rebuild_segment_stack(&new_path, start);
 
                     let new_cur = *new_path.last().unwrap();
                     let next_skip_child_enter = if new_cur == child_enter {
