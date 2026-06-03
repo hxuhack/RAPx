@@ -69,9 +69,10 @@ where
 
 /// Convert unordered path constraints into a stable, hashable key.
 pub fn constraints_key(constraints: &FxHashMap<usize, usize>) -> Vec<(usize, usize)> {
-    let mut v: Vec<(usize, usize)> = constraints.iter().map(|(k, val)| (*k, *val)).collect();
-    v.sort_unstable();
-    v
+    let mut sorted_constraints: Vec<(usize, usize)> =
+        constraints.iter().map(|(k, val)| (*k, *val)).collect();
+    sorted_constraints.sort_unstable();
+    sorted_constraints
 }
 
 /// Build a dedup key from a path and its associated constraints.
@@ -103,6 +104,8 @@ pub fn node_is_in_current_scc(start: usize, scc: &SccInfo, node: usize) -> bool 
 /// Rebuild the per-segment recursion stack from the suffix after the latest
 /// dominator (`start`) occurrence in `path`.
 pub fn rebuild_segment_stack(path: &[usize], start: usize) -> FxHashSet<usize> {
+    // `path` is expected to begin with `start` in our SCC DFS. If a caller provides
+    // an unexpected path without `start`, we conservatively fall back to the full path.
     let last_start_pos = path.iter().rposition(|&node| node == start).unwrap_or(0);
     let mut segment_stack = FxHashSet::default();
     for node in &path[last_start_pos..] {
