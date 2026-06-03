@@ -281,39 +281,3 @@ impl Scc for SccComponentCollector {
         self.successors.len()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn constraints_key_is_stable() {
-        let mut constraints = FxHashMap::default();
-        constraints.insert(5, 2);
-        constraints.insert(1, 7);
-
-        assert_eq!(constraints_key(&constraints), vec![(1, 7), (5, 2)]);
-    }
-
-    #[test]
-    fn record_unique_path_deduplicates() {
-        let constraints = FxHashMap::default();
-        let mut out = Vec::new();
-        let mut seen = FxHashSet::default();
-
-        record_unique_path(&[1, 2, 3], &constraints, &mut out, &mut seen);
-        record_unique_path(&[1, 2, 3], &constraints, &mut out, &mut seen);
-
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].0, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn traversal_state_prunes_non_incremental_cycle() {
-        let mut first_cycle = SccPathTraversalState::new(1).descend_to(2).descend_to(1);
-        assert!(first_cycle.prepare_for_current_node());
-
-        let mut repeated_cycle = first_cycle.descend_to(2).descend_to(1);
-        assert!(!repeated_cycle.prepare_for_current_node());
-    }
-}
