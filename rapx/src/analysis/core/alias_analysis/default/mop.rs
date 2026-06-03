@@ -14,7 +14,10 @@ use std::{
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 
-use crate::utils::scc::{SccInfo, SccTree};
+use crate::graphs::{
+    scc::{SccInfo, SccTree},
+    scc_paths::build_scc_tree,
+};
 
 use super::{block::Term, graph::*, *};
 
@@ -503,29 +506,7 @@ impl<'tcx> MopGraph<'tcx> {
     }
 
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccTree {
-        // child_enter -> SccInfo
-        let mut child_sccs: FxHashMap<usize, SccInfo> = FxHashMap::default();
-
-        // find all sub sccs
-        for &node in scc.nodes.iter() {
-            let node_scc = &self.blocks[node].scc;
-            if node_scc.enter != scc.enter && !node_scc.nodes.is_empty() {
-                child_sccs
-                    .entry(node_scc.enter)
-                    .or_insert_with(|| node_scc.clone());
-            }
-        }
-
-        // recursively sort children
-        let children = child_sccs
-            .into_values()
-            .map(|child_scc| self.sort_scc_tree(&child_scc))
-            .collect();
-
-        SccTree {
-            scc: scc.clone(),
-            children,
-        }
+        build_scc_tree(scc, |node| self.blocks.get(node).map(|block| block.scc.clone()))
     }
 
     pub fn find_scc_paths(
