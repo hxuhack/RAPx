@@ -116,7 +116,7 @@ impl<'tcx> BackwardVisitor<'tcx> {
                     self.visit_statement(*block, statement_index, statement, relevant, items);
                 }
             }
-            PathStep::LoopExit { .. } => {
+            PathStep::SccExit { .. } => {
                 items.push(BackwardItem::Forget {
                     reason: ForgetReason::LoopWithoutSummary,
                 });
@@ -842,17 +842,19 @@ fn same_path_step(lhs: &PathStep, rhs: &PathStep) -> bool {
     match (lhs, rhs) {
         (PathStep::Block(lhs), PathStep::Block(rhs)) => lhs == rhs,
         (
-            PathStep::LoopExit {
-                header: lhs_header,
+            PathStep::SccExit {
+                representative: lhs_representative,
                 from: lhs_from,
                 to: lhs_to,
             },
-            PathStep::LoopExit {
-                header: rhs_header,
+            PathStep::SccExit {
+                representative: rhs_representative,
                 from: rhs_from,
                 to: rhs_to,
             },
-        ) => lhs_header == rhs_header && lhs_from == rhs_from && lhs_to == rhs_to,
+        ) => {
+            lhs_representative == rhs_representative && lhs_from == rhs_from && lhs_to == rhs_to
+        }
         (PathStep::Callsite(lhs), PathStep::Callsite(rhs)) => lhs == rhs,
         _ => false,
     }
@@ -862,8 +864,8 @@ fn same_path_step(lhs: &PathStep, rhs: &PathStep) -> bool {
 fn describe_path_start(start: &super::path::PathStart) -> String {
     match start {
         super::path::PathStart::FunctionEntry => "entry".to_string(),
-        super::path::PathStart::LoopHeader { header } => {
-            format!("loop-header(bb{})", header.as_usize())
+        super::path::PathStart::SccRepresentative { representative } => {
+            format!("scc-representative(bb{})", representative.as_usize())
         }
     }
 }
@@ -872,9 +874,13 @@ fn describe_path_start(start: &super::path::PathStart) -> String {
 fn describe_path_step(step: &PathStep) -> String {
     match step {
         PathStep::Block(block) => format!("bb{}", block.as_usize()),
-        PathStep::LoopExit { header, from, to } => format!(
-            "Loop(bb{}).exit(bb{} -> bb{})",
-            header.as_usize(),
+        PathStep::SccExit {
+            representative,
+            from,
+            to,
+        } => format!(
+            "SccRegion(bb{}).exit(bb{} -> bb{})",
+            representative.as_usize(),
             from.as_usize(),
             to.as_usize()
         ),
