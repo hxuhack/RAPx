@@ -571,7 +571,7 @@ impl<'tcx> MopGraph<'tcx> {
             return;
         }
 
-        // Clear the constriants if the local is reassigned in the current block;
+        // Clear the constraints if the local is reassigned in the current block;
         // Otherwise, it cannot reach other branches.
         for local in &self.blocks[state.cur].assigned_locals {
             rap_debug!(
@@ -581,7 +581,7 @@ impl<'tcx> MopGraph<'tcx> {
             path_constraints.remove(&local);
         }
 
-        // Find the pathes of inner scc recursively;
+        // Find the paths of inner scc recursively;
         for child_tree in &scc_tree.children {
             let child_enter = child_tree.scc.enter;
             if state.cur == child_enter {
