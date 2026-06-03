@@ -707,11 +707,11 @@ fn find_scc_regions(cfg: &CFG) -> (Vec<SccRegion>, FxHashMap<BasicBlock, BasicBl
     let mut block_to_scc = FxHashMap::default();
     for mut component in components {
         component.sort_unstable();
-        let is_self_scc = component.len() == 1
+        let has_self_edge = component.len() == 1
             && cfg.successors[component[0]]
                 .iter()
                 .any(|succ| succ.as_usize() == component[0]);
-        if component.len() <= 1 && !is_self_scc {
+        if component.len() <= 1 && !has_self_edge {
             continue;
         }
 

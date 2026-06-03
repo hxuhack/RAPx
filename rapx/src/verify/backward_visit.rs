@@ -118,7 +118,7 @@ impl<'tcx> BackwardVisitor<'tcx> {
             }
             PathStep::SccExit { .. } => {
                 items.push(BackwardItem::Forget {
-                    reason: ForgetReason::LoopWithoutSummary,
+                    reason: ForgetReason::SccWithoutSummary,
                 });
                 items.push(BackwardItem::PathStep {
                     step: step.clone(),
@@ -373,8 +373,8 @@ pub enum KeepReason {
 pub enum ForgetReason {
     /// A call may modify relevant state but has no summary yet.
     UnknownCall,
-    /// A loop may modify relevant state but has no summary yet.
-    LoopWithoutSummary,
+    /// An SCC region may modify relevant state but has no summary yet.
+    SccWithoutSummary,
     /// A write may alias relevant state.
     MayAliasWrite,
     /// A relevant statement or terminator is not supported yet.
@@ -921,8 +921,8 @@ fn describe_forget_reason(reason: &ForgetReason) -> &'static str {
         ForgetReason::UnknownCall => {
             "UnknownCall: a retained call may affect relevant state and has no summary yet"
         }
-        ForgetReason::LoopWithoutSummary => {
-            "LoopWithoutSummary: a relevant loop exit has no verified loop summary yet"
+        ForgetReason::SccWithoutSummary => {
+            "SccWithoutSummary: a relevant SCC exit has no verified SCC summary yet"
         }
         ForgetReason::MayAliasWrite => {
             "MayAliasWrite: a write may alias relevant state and is not modeled precisely yet"
