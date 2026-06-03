@@ -11,7 +11,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::def_id::DefId;
 use rustc_middle::{mir::BasicBlock, ty::TyCtxt};
 
-use crate::utils::scc::Scc;
+use crate::graphs::scc_paths::collect_scc_components;
 
 use super::helpers::{CFG, Callsite, CallsiteLocation};
 
@@ -696,12 +696,16 @@ fn has_other_callsite(
 
 /// Detect loops in a CFG using SCCs.
 fn find_loops(cfg: &CFG) -> (Vec<Loop>, FxHashMap<BasicBlock, BasicBlock>) {
-    let mut detector = SccDetector::new(cfg.successors.clone());
-    detector.find_scc();
+    let successors: Vec<Vec<usize>> = cfg
+        .successors
+        .iter()
+        .map(|nexts| nexts.iter().map(|bb| bb.as_usize()).collect())
+        .collect();
+    let components = collect_scc_components(&successors);
 
     let mut loops = Vec::new();
     let mut block_to_loop = FxHashMap::default();
-    for mut component in detector.components {
+    for mut component in components {
         component.sort_unstable();
         let is_self_loop = component.len() == 1
             && cfg.successors[component[0]]
@@ -746,41 +750,4 @@ fn find_loops(cfg: &CFG) -> (Vec<Loop>, FxHashMap<BasicBlock, BasicBlock>) {
     }
 
     (loops, block_to_loop)
-}
-
-/// Adapter that lets the shared SCC utility run over a MIR CFG.
-struct SccDetector {
-    successors: Vec<Vec<BasicBlock>>,
-    components: Vec<Vec<usize>>,
-}
-
-impl SccDetector {
-    /// Create an SCC detector over a concrete successor list.
-    fn new(successors: Vec<Vec<BasicBlock>>) -> Self {
-        Self {
-            successors,
-            components: Vec::new(),
-        }
-    }
-}
-
-impl Scc for SccDetector {
-    /// Store every SCC discovered by the shared Tarjan utility.
-    fn on_scc_found(&mut self, _root: usize, scc_components: &[usize]) {
-        self.components.push(scc_components.to_vec());
-    }
-
-    /// Return outgoing successor indices for the SCC traversal.
-    fn get_next(&mut self, root: usize) -> FxHashSet<usize> {
-        self.successors
-            .get(root)
-            .into_iter()
-            .flat_map(|successors| successors.iter().map(|bb| bb.as_usize()))
-            .collect()
-    }
-
-    /// Return the number of CFG nodes in the detector graph.
-    fn get_size(&mut self) -> usize {
-        self.successors.len()
-    }
 }
