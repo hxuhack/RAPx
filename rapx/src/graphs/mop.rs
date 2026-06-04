@@ -146,10 +146,6 @@ impl<'tcx> MeetOverPathsGraph<'tcx> {
 
             if processed_scc_indices.insert(scc_idx) {
                 expanded_path.push(scc_idx);
-                let scc_enter = self.mop_block(scc_idx);
-                if !scc_enter.scc.nodes.is_empty() {
-                    // expanded SCC members intentionally omitted here
-                }
             } else {
                 expanded_path.push(scc_idx);
             }
