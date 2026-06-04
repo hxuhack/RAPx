@@ -1,4 +1,4 @@
-use super::{MopAliasPair, MopFnAliasMap, block::Term, graph::*, types::*, value::*};
+use super::{graph::*, types::*, value::*, MopAliasPair, MopFnAliasMap};
 use crate::{def_id::*, graphs::scc::Scc};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_hir::def_id::DefId;
@@ -33,7 +33,7 @@ impl<'tcx> MopGraph<'tcx> {
         recursion_set: &mut HashSet<DefId>,
     ) {
         let cur_block = self.blocks[bb_index].clone();
-        if let Term::Call(call) | Term::Drop(call) = cur_block.terminator {
+        if let Some(call) = cur_block.terminator {
             if let TerminatorKind::Call {
                 func: Operand::Constant(ref constant),
                 ref args,

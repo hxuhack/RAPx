@@ -1,6 +1,7 @@
 use super::{bug_records::*, corner_case::*, drop::*, graph::*};
 use crate::{
-    analysis::core::alias_analysis::default::{MopFnAliasMap, block::Term, types::ValueKind},
+    analysis::core::alias_analysis::default::{types::ValueKind, MopFnAliasMap},
+    def_id::*,
     utils::source::{get_filename, get_name},
 };
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
@@ -20,7 +21,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
     pub fn drop_check(&mut self, bb_idx: usize) {
         let cur_block = self.mop_graph.blocks[bb_idx].clone();
         let is_cleanup = cur_block.is_cleanup;
-        if let Term::Drop(drop) = cur_block.terminator {
+        if let Some(drop) = cur_block.terminator {
             rap_debug!("drop check bb: {}, {:?}", bb_idx, drop);
             match drop.kind {
                 TerminatorKind::Drop {
@@ -39,8 +40,17 @@ impl<'tcx> SafeDropGraph<'tcx> {
                     self.add_to_drop_record(value_idx, bb_idx, &info, is_cleanup);
                 }
                 TerminatorKind::Call {
-                    func: _, ref args, ..
+                    ref func, ref args, ..
                 } => {
+                    let Operand::Constant(c) = func else {
+                        return;
+                    };
+                    let ty::FnDef(id, ..) = c.ty().kind() else {
+                        return;
+                    };
+                    if !is_drop_fn(*id) {
+                        return;
+                    }
                     if args.len() > 0 {
                         let place = match args[0].node {
                             Operand::Copy(place) => place,
@@ -151,9 +161,9 @@ impl<'tcx> SafeDropGraph<'tcx> {
         let cur_block = self.mop_graph.blocks[bb_idx].clone();
         /* Handle cases if the current block is a merged scc block with sub block */
         let scc = self.mop_graph.sort_scc_tree(&cur_block.scc);
-        let paths_in_scc =
-            self.mop_graph
-                .find_scc_paths(bb_idx, &scc, &mut FxHashMap::default());
+        let paths_in_scc = self
+            .mop_graph
+            .find_scc_paths(bb_idx, &scc, &mut FxHashMap::default());
         rap_debug!("Paths in scc: {:?}", paths_in_scc);
 
         let backup_values = self.mop_graph.values.clone(); // duplicate the status when visiteding different paths;
@@ -224,7 +234,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
         let mut sw_target = 0; // Single target
         let mut path_discr_id = 0; // To avoid analyzing paths that cannot be reached with one enum type.
         let mut sw_targets = None; // Multiple targets of SwitchInt
-        if let Term::Switch(switch) = &cur_block.terminator {
+        if let Some(switch) = &cur_block.terminator {
             rap_debug!("Handle switchInt in bb {:?}", cur_block);
             if let TerminatorKind::SwitchInt {
                 ref discr,
