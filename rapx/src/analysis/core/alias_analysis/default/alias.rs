@@ -33,7 +33,7 @@ impl<'tcx> MopGraph<'tcx> {
         recursion_set: &mut HashSet<DefId>,
     ) {
         let cur_block = self.blocks[bb_index].clone();
-        if let Some(call) = cur_block.terminator {
+        if let Some(terminator) = cur_block.terminator {
             if let TerminatorKind::Call {
                 func: Operand::Constant(ref constant),
                 ref args,
@@ -42,7 +42,7 @@ impl<'tcx> MopGraph<'tcx> {
                 unwind: _,
                 call_source: _,
                 fn_span: _,
-            } = call.kind
+            } = terminator.kind
             {
                 let lv = self.projection(*destination);
                 let mut may_drop = false;

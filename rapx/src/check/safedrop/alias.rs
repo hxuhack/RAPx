@@ -35,7 +35,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
     /* Check the aliases introduced by the terminators (function call) of a scc block */
     pub fn alias_bbcall(&mut self, bb_index: usize, fn_map: &MopFnAliasMap) {
         let cur_block = self.mop_graph.blocks[bb_index].clone();
-        if let Some(call) = cur_block.terminator {
+        if let Some(terminator) = cur_block.terminator {
             if let TerminatorKind::Call {
                 func: Operand::Constant(ref constant),
                 ref args,
@@ -44,9 +44,9 @@ impl<'tcx> SafeDropGraph<'tcx> {
                 unwind: _,
                 call_source: _,
                 fn_span: _,
-            } = call.kind
+            } = terminator.kind
             {
-                rap_debug!("alias_bbcall in {:?}: {:?}", bb_index, call);
+                rap_debug!("alias_bbcall in {:?}: {:?}", bb_index, terminator);
                 let lv = self.projection(destination.clone());
                 let mut merge_vec = Vec::new();
                 merge_vec.push(lv);
@@ -58,7 +58,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
                     match arg.node {
                         Operand::Copy(ref p) | Operand::Move(ref p) => {
                             let rv = self.projection(p.clone());
-                            self.uaf_check(rv, bb_index, call.source_info.span, true);
+                            self.uaf_check(rv, bb_index, terminator.source_info.span, true);
                             merge_vec.push(rv);
                             if self.mop_graph.values[rv].may_drop {
                                 may_drop_flag += 1;

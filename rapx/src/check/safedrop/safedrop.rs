@@ -21,9 +21,9 @@ impl<'tcx> SafeDropGraph<'tcx> {
     pub fn drop_check(&mut self, bb_idx: usize) {
         let cur_block = self.mop_graph.blocks[bb_idx].clone();
         let is_cleanup = cur_block.is_cleanup;
-        if let Some(drop) = cur_block.terminator {
-            rap_debug!("drop check bb: {}, {:?}", bb_idx, drop);
-            match drop.kind {
+        if let Some(terminator) = cur_block.terminator {
+            rap_debug!("drop check bb: {}, {:?}", bb_idx, terminator);
+            match terminator.kind {
                 TerminatorKind::Drop {
                     ref place,
                     target: _,
@@ -36,7 +36,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
                         return;
                     }
                     let value_idx = self.projection(place.clone());
-                    let info = drop.source_info.clone();
+                    let info = terminator.source_info.clone();
                     self.add_to_drop_record(value_idx, bb_idx, &info, is_cleanup);
                 }
                 TerminatorKind::Call {
@@ -51,7 +51,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
                     if !is_drop_fn(*id) {
                         return;
                     }
-                    if args.len() > 0 {
+                    if !args.is_empty() {
                         let place = match args[0].node {
                             Operand::Copy(place) => place,
                             Operand::Move(place) => place,
@@ -64,7 +64,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
                             return;
                         }
                         let local = self.projection(place.clone());
-                        let info = drop.source_info.clone();
+                        let info = terminator.source_info.clone();
                         self.add_to_drop_record(local, bb_idx, &info, is_cleanup);
                     }
                 }
@@ -234,14 +234,14 @@ impl<'tcx> SafeDropGraph<'tcx> {
         let mut sw_target = 0; // Single target
         let mut path_discr_id = 0; // To avoid analyzing paths that cannot be reached with one enum type.
         let mut sw_targets = None; // Multiple targets of SwitchInt
-        if let Some(switch) = &cur_block.terminator {
+        if let Some(terminator) = &cur_block.terminator {
             rap_debug!("Handle switchInt in bb {:?}", cur_block);
             if let TerminatorKind::SwitchInt {
                 ref discr,
                 ref targets,
-            } = switch.kind
+            } = terminator.kind
             {
-                rap_debug!("{:?}", switch);
+                rap_debug!("{:?}", terminator);
                 rap_debug!("{:?}", self.mop_graph.constants);
                 match discr {
                     Copy(p) | Move(p) => {

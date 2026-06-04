@@ -409,13 +409,9 @@ impl<'tcx> MopGraph<'tcx> {
                     }
                 }
                 TerminatorKind::Call {
-                    func: _,
-                    args: _,
-                    destination: _,
                     ref target,
                     ref unwind,
-                    call_source: _,
-                    fn_span: _,
+                    ..
                 } => {
                     if let Some(tt) = target {
                         cur_bb.add_next(tt.as_usize());
