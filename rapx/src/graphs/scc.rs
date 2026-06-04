@@ -133,9 +133,3 @@ pub trait Scc {
     }
 }
 
-/// Tree representation for nested SCC metadata.
-#[derive(Debug)]
-pub struct SccTree {
-    pub scc: SccInfo,
-    pub children: Vec<SccTree>,
-}
