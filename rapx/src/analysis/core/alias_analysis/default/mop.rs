@@ -17,8 +17,8 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use crate::graphs::{
     scc::SccInfo,
     scc_paths::{
-        SccEnumeratedPath, SccPathAction, SccPathSemantics, SccPathTraversalConfig,
-        SccPathTraversalState, constraints_key, enumerate_scc_paths,
+        SccEnumeratedPath, SccPathAction, SccPathCacheKey, SccPathSemantics,
+        SccPathTraversalConfig, SccPathTraversalState, enumerate_scc_paths,
     },
 };
 
@@ -41,16 +41,6 @@ thread_local! {
     static SCC_PATH_CACHE: RefCell<
         FxHashMap<SccPathCacheKey, Vec<SccEnumeratedPath>>
     > = RefCell::new(FxHashMap::default());
-}
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct SccPathCacheKey {
-    /// The analyzed function; constraints are only comparable inside one MIR body.
-    def_id: DefId,
-    /// SCC entry block where path enumeration starts.
-    scc_enter: usize,
-    /// Canonicalized path-sensitive constraints carried into the SCC.
-    constraints: Vec<(usize, usize)>,
 }
 
 #[derive(Clone)]
@@ -733,11 +723,7 @@ impl<'tcx> MopGraph<'tcx> {
     ) -> Vec<SccEnumeratedPath> {
         // Cache key includes incoming constraints because SCC traversal is path-sensitive:
         // the same SCC can produce different feasible paths under different discriminant facts.
-        let key = SccPathCacheKey {
-            def_id: self.def_id(),
-            scc_enter: scc.enter,
-            constraints: constraints_key(initial_constraints),
-        };
+        let key = SccPathCacheKey::new(self.def_id(), scc.enter, initial_constraints);
 
         if let Some(cached) = SCC_PATH_CACHE.with(|c| c.borrow().get(&key).cloned()) {
             return cached;

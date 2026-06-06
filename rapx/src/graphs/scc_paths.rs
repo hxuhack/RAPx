@@ -9,6 +9,7 @@
 //! downstream consumers such as range analysis and Senryx.
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_span::def_id::DefId;
 
 use super::scc::{Scc, SccInfo};
 
@@ -22,6 +23,43 @@ const WHOLE_CFG_PATH_DEPTH_LIMIT: usize = 256;
 struct PathKey {
     path: Vec<usize>,
     constraints: Vec<(usize, usize)>,
+}
+
+/// Cache key for memoizing SCC path enumeration results.
+///
+/// Two invocations with the same `(def_id, scc_enter, constraints)` will
+/// always produce identical path sets, so the result can be reused.
+/// Constraints are stored in canonicalized (sorted) form via [`constraints_key`].
+///
+/// This key is defined here (rather than in a concrete analysis) because it
+/// captures identity of the SCC path traversal inputs, not analysis-specific
+/// semantics.
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub(crate) struct SccPathCacheKey {
+    /// The analyzed function; constraints are only comparable inside one MIR body.
+    pub def_id: DefId,
+    /// SCC entry block where path enumeration starts.
+    pub scc_enter: usize,
+    /// Canonicalized path-sensitive constraints carried into the SCC.
+    pub constraints: Vec<(usize, usize)>,
+}
+
+impl SccPathCacheKey {
+    /// Construct a cache key from raw traversal inputs.
+    ///
+    /// `initial_constraints` are canonicalized via [`constraints_key`] so that
+    /// insertion order does not affect equality.
+    pub(crate) fn new(
+        def_id: DefId,
+        scc_enter: usize,
+        initial_constraints: &FxHashMap<usize, usize>,
+    ) -> Self {
+        Self {
+            def_id,
+            scc_enter,
+            constraints: constraints_key(initial_constraints),
+        }
+    }
 }
 
 /// Collect all SCC components from a successor graph.
