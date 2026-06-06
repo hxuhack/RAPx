@@ -337,7 +337,9 @@ fn enumerate_scc_paths_inner<S: SccPathSemantics>(
 
             let mut new_path = state.path.clone();
             new_path.extend(&subp[1..]);
-            let new_cur = *new_path.last().unwrap_or(&state.cur);
+            let new_cur = *new_path
+                .last()
+                .expect("spliced child path must be non-empty");
             let next_skip_child_enter = if new_cur == child_enter {
                 Some(child_enter)
             } else {
