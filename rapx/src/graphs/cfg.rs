@@ -154,12 +154,8 @@ impl<'tcx> ControlFlowGraph<'tcx> {
 
         for &block_idx in path {
             let scc_idx = self.block(block_idx).scc.enter;
-
-            if processed_scc_indices.insert(scc_idx) {
-                expanded_path.push(scc_idx);
-            } else {
-                expanded_path.push(scc_idx);
-            }
+            processed_scc_indices.insert(scc_idx);
+            expanded_path.push(scc_idx);
         }
 
         expanded_path
@@ -251,7 +247,7 @@ pub fn scc_handler<'tcx>(
     let scc_exits = graph.block(root).scc.exits.clone();
     let backnodes = graph.block(root).scc.backnodes.clone();
 
-    for &node in scc_components {
+    for &node in &scc_components[1..] {
         let block = graph.block_mut(node);
         if backnodes.contains(&node) {
             backups.push((node, block.next.clone()));
