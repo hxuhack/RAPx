@@ -82,7 +82,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invalidate_assigned_local_constraints_keeps_unrelated_facts() {
+    fn test_invalidate_assigned_local_constraints_keeps_unrelated_facts() {
         let mut block = CfgBlock::new(0, false);
         block.assigned_locals.insert(1);
         block.assigned_locals.insert(3);
