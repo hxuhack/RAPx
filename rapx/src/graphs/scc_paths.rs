@@ -310,6 +310,11 @@ pub enum SccPathAction {
 }
 
 pub trait SccPathSemantics {
+    /// Hook invoked before enumerating child SCCs or outgoing actions for `node`.
+    ///
+    /// Prefer delegating generic path-state maintenance to shared graph/CFG
+    /// helpers (for example assignment-driven constraint invalidation) so this
+    /// hook only carries analysis-specific traversal semantics.
     fn on_node_enter(&mut self, _node: usize, _constraints: &mut SccPathConstraints) {}
 
     fn child_scc_enters<'a>(&self, scc: &'a SccInfo) -> &'a [usize] {

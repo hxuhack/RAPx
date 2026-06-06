@@ -1,6 +1,9 @@
 use crate::graphs::scc::{Scc, SccExit, SccInfo};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_middle::{mir::Terminator, ty::TyCtxt};
+use rustc_middle::{
+    mir::{Statement, StatementKind, Terminator},
+    ty::TyCtxt,
+};
 use rustc_span::def_id::DefId;
 
 /// Reusable CFG block structure shared by analyses built over MIR.
@@ -50,6 +53,49 @@ impl<'tcx> CfgBlock<'tcx> {
     /// Add a successor edge from this block to `index`.
     pub fn add_next(&mut self, index: usize) {
         self.next.insert(index);
+    }
+
+    /// Collect reusable path-sensitive facts from a MIR statement.
+    ///
+    /// These facts belong to shared CFG/path infrastructure because any
+    /// path-sensitive analysis may need to drop stale constraints after a local
+    /// is reassigned, not just alias analysis.
+    pub fn collect_path_facts_from_statement(&mut self, stmt: &Statement<'tcx>) {
+        if let StatementKind::Assign(box (place, _)) = &stmt.kind {
+            self.assigned_locals.insert(place.local.as_usize());
+        }
+    }
+
+    /// Invalidate path constraints that became stale after assignments in this block.
+    pub fn invalidate_assigned_local_constraints(
+        &self,
+        constraints: &mut FxHashMap<usize, usize>,
+    ) {
+        for local in &self.assigned_locals {
+            constraints.remove(local);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalidate_assigned_local_constraints_keeps_unrelated_facts() {
+        let mut block = CfgBlock::new(0, false);
+        block.assigned_locals.insert(1);
+        block.assigned_locals.insert(3);
+
+        let mut constraints = FxHashMap::default();
+        constraints.insert(1, 10);
+        constraints.insert(2, 20);
+        constraints.insert(3, 30);
+
+        block.invalidate_assigned_local_constraints(&mut constraints);
+
+        assert_eq!(constraints.len(), 1);
+        assert_eq!(constraints.get(&2), Some(&20));
     }
 }
 

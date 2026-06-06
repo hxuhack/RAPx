@@ -26,6 +26,7 @@ pub struct MopGraph<'tcx> {
     // For fields, the value index is determined via auto increment.
     pub values: Vec<Value>,
     // Alias-analysis-specific facts extracted from each MIR block.
+    // Shared CFG/path facts such as `assigned_locals` live on `cfg.blocks`.
     pub block_facts: Vec<AliasBlockFacts<'tcx>>,
     pub alias_sets: Vec<FxHashSet<usize>>,
     // contains the return results for inter-procedure analysis.
@@ -71,12 +72,12 @@ impl<'tcx> MopGraph<'tcx> {
 
             // handle general statements
             for stmt in &bb.statements {
+                cfg_block.collect_path_facts_from_statement(stmt);
                 let span = stmt.source_info.span;
                 match &stmt.kind {
                     StatementKind::Assign(box (place, rvalue)) => {
                         let lv_place = *place;
                         let lv_local = place.local.as_usize();
-                        cfg_block.assigned_locals.insert(lv_local);
                         match rvalue.clone() {
                             // rvalue is a Rvalue
                             Rvalue::Use(operand) => {
