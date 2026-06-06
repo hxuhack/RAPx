@@ -106,17 +106,8 @@ struct MopSccPathSemantics<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> SccPathSemantics for MopSccPathSemantics<'a, 'tcx> {
-    fn on_node_enter(&mut self, node: usize, constraints: &mut FxHashMap<usize, usize>) {
-        // Path constraints are facts about the current value of a discriminant/local.
-        // Once a local is reassigned along this path, prior facts about that local are stale
-        // and must be dropped to avoid using invalid path-sensitive assumptions downstream.
-        for local in &self.graph.cfg_block(node).assigned_locals {
-            rap_debug!(
-                "Remove path_constraints {:?}, because it has been reassigned.",
-                local
-            );
-            constraints.remove(local);
-        }
+    fn assigned_locals_for_node(&self, node: usize) -> &FxHashSet<usize> {
+        &self.graph.cfg_block(node).assigned_locals
     }
 
     fn enumerate_child_paths(

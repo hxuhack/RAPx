@@ -8,6 +8,8 @@
 //! and the [`WholeCfgPathEnumerator`] trait, which is the unified entry point for
 //! downstream consumers such as range analysis and Senryx.
 
+use std::sync::OnceLock;
+
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 
 use super::scc::{Scc, SccInfo};
@@ -259,7 +261,30 @@ pub enum SccPathAction {
     },
 }
 
+/// Returns a reference to a shared empty locals set used as the default for
+/// [`SccPathSemantics::assigned_locals_for_node`].
+fn empty_locals() -> &'static FxHashSet<usize> {
+    static EMPTY: OnceLock<FxHashSet<usize>> = OnceLock::new();
+    EMPTY.get_or_init(FxHashSet::default)
+}
+
 pub trait SccPathSemantics {
+    /// Returns the set of locals assigned in CFG block `node`.
+    ///
+    /// The traversal framework calls this on every node entry and automatically
+    /// removes the corresponding keys from the path constraints, ensuring that
+    /// stale path-sensitive facts are not carried across a reassignment.
+    ///
+    /// The default implementation returns an empty set (no invalidation).
+    fn assigned_locals_for_node(&self, _node: usize) -> &FxHashSet<usize> {
+        empty_locals()
+    }
+
+    /// Called after the framework has invalidated constraints for reassigned locals.
+    ///
+    /// Override this hook for any additional analysis-specific bookkeeping on
+    /// node entry.  The generic assigned-local invalidation is handled by the
+    /// framework before this hook is invoked.
     fn on_node_enter(&mut self, _node: usize, _constraints: &mut SccPathConstraints) {}
 
     fn child_scc_enters<'a>(&self, scc: &'a SccInfo) -> &'a [usize] {
@@ -327,6 +352,19 @@ fn enumerate_scc_paths_inner<S: SccPathSemantics>(
         return;
     }
 
+    // Invalidate stale path constraints for locals reassigned in this block.
+    // Path constraints are facts about a discriminant/local's current value; once
+    // a local is overwritten along this path, the prior fact is no longer valid.
+    for local in semantics.assigned_locals_for_node(state.cur) {
+        rap_debug!(
+            "Removing path constraint for local {:?}: reassigned in block {}.",
+            local,
+            state.cur
+        );
+        path_constraints.remove(local);
+    }
+
+    // Allow analysis-specific node-entry bookkeeping beyond local invalidation.
     semantics.on_node_enter(state.cur, &mut path_constraints);
 
     for &child_enter in semantics.child_scc_enters(scc) {
