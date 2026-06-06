@@ -10,6 +10,7 @@
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_span::def_id::DefId;
+use std::cell::RefCell;
 
 use super::scc::{Scc, SccInfo};
 
@@ -17,6 +18,17 @@ use super::scc::{Scc, SccInfo};
 const WHOLE_CFG_PATH_LIMIT: usize = 4000;
 /// Maximum DFS depth for whole-CFG path enumeration.
 const WHOLE_CFG_PATH_DEPTH_LIMIT: usize = 256;
+/// Bounded cache for SCC path enumeration.
+///
+/// SCC path enumeration is expensive and often re-run with the same
+/// `(fn, scc_enter, constraints)` inputs.
+const SCC_PATH_CACHE_LIMIT: usize = 2048;
+
+thread_local! {
+    static SCC_PATH_CACHE: RefCell<
+        FxHashMap<SccPathCacheKey, Vec<SccEnumeratedPath>>
+    > = RefCell::new(FxHashMap::default());
+}
 
 /// Stable key for deduplicating path + path-constraint combinations.
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -480,6 +492,37 @@ pub fn enumerate_scc_paths<S: SccPathSemantics>(
         &config,
         0,
     );
+    all_paths
+}
+
+/// Enumerate SCC paths with a shared bounded memoization cache.
+///
+/// Cache identity is based on [`SccPathCacheKey`], i.e. analyzed function,
+/// SCC entry, and canonicalized incoming constraints.
+pub fn enumerate_scc_paths_cached<S: SccPathSemantics>(
+    def_id: DefId,
+    start: usize,
+    scc: &SccInfo,
+    initial_constraints: SccPathConstraints,
+    semantics: &mut S,
+    config: SccPathTraversalConfig,
+) -> Vec<SccEnumeratedPath> {
+    let key = SccPathCacheKey::new(def_id, scc.enter, &initial_constraints);
+    if let Some(cached) = SCC_PATH_CACHE.with(|c| c.borrow().get(&key).cloned()) {
+        return cached;
+    }
+
+    let all_paths = enumerate_scc_paths(start, scc, initial_constraints, semantics, config);
+
+    SCC_PATH_CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        if cache.len() >= SCC_PATH_CACHE_LIMIT {
+            // Keep cache bounded; this is a heuristic performance guard, not a semantic limit.
+            cache.clear();
+        }
+        cache.insert(key, all_paths.clone());
+    });
+
     all_paths
 }
 
