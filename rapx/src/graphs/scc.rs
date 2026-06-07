@@ -256,7 +256,19 @@ fn collect_scc_components(successors: &[Vec<usize>]) -> Vec<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SccExit, analyze_scc_regions};
+    use super::{SccExit, analyze_scc_regions, collect_scc_components};
+
+    #[test]
+    fn collect_scc_components_finds_tarjan_components() {
+        let successors = vec![vec![1], vec![2], vec![1, 3], vec![]];
+        let mut components = collect_scc_components(&successors);
+        for component in &mut components {
+            component.sort_unstable();
+        }
+        components.sort_unstable();
+
+        assert_eq!(components, vec![vec![0], vec![1, 2], vec![3]]);
+    }
 
     #[test]
     fn analyze_scc_regions_collects_non_trivial_scc_metadata() {
