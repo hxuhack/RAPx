@@ -1,4 +1,4 @@
-use crate::analysis::{Analysis, core::alias_analysis::default::graph::MopGraph};
+use crate::analysis::{Analysis, core::path_analysis::graph::PathGraph};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::{def::DefKind, def_id::DefId};
 use rustc_middle::ty::TyCtxt;
@@ -27,7 +27,7 @@ impl<'tcx> PathAnalyzer<'tcx> {
             return None;
         }
 
-        let mut graph = MopGraph::new(self.tcx, def_id);
+        let mut graph = PathGraph::new(self.tcx, def_id);
         graph.find_scc();
         let paths = graph.get_path_sensitive_paths();
 

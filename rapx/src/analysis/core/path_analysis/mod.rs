@@ -1,3 +1,4 @@
+pub mod graph;
 pub mod default;
 
 use crate::utils::source::get_fn_name_byid;
