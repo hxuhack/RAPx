@@ -5,7 +5,7 @@
 //! agnostic: clients provide successor queries and receive each discovered SCC
 //! through `on_scc_found`.
 
-use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use std::cmp;
 
 /// An outgoing edge from an SCC body to a block outside the SCC.
@@ -54,6 +54,82 @@ impl SccInfo {
     /// A trivial SCC has no loops and requires no special path enumeration.
     pub fn is_trivial(&self) -> bool {
         self.nodes.is_empty()
+    }
+}
+
+/// SCC region metadata summarized from a plain successor graph.
+#[derive(Debug, Clone)]
+pub struct SccRegionSummary {
+    /// Stable SCC representative (smallest node id in this SCC).
+    pub representative: usize,
+    /// All nodes inside the SCC, including `representative`.
+    pub blocks: Vec<usize>,
+    /// Edges leaving this SCC.
+    pub exits: Vec<SccExit>,
+    /// Internal edges considered as loop backedges.
+    pub backedges: Vec<(usize, usize)>,
+}
+
+/// Reusable SCC analysis result for modules that only have successor lists.
+#[derive(Debug, Clone, Default)]
+pub struct SccAnalysis {
+    /// Non-trivial SCC regions (multi-node SCCs or self-loop SCCs).
+    pub regions: Vec<SccRegionSummary>,
+    /// Map each SCC member node to its SCC representative.
+    pub node_to_representative: FxHashMap<usize, usize>,
+}
+
+/// Analyze non-trivial SCC regions from a plain successor graph.
+///
+/// This keeps SCC region metadata in the shared graph layer so downstream
+/// analyses (for example verification path extraction) can reuse it directly.
+pub fn analyze_scc_regions(successors: &[Vec<usize>]) -> SccAnalysis {
+    let components = collect_scc_components(successors);
+    let mut regions = Vec::new();
+    let mut node_to_representative = FxHashMap::default();
+
+    for mut component in components {
+        component.sort_unstable();
+        let has_self_edge = component.len() == 1
+            && successors[component[0]]
+                .iter()
+                .any(|&succ| succ == component[0]);
+        if component.len() <= 1 && !has_self_edge {
+            continue;
+        }
+
+        let representative = component[0];
+        let block_set: FxHashSet<usize> = component.iter().copied().collect();
+        let mut exits = Vec::new();
+        let mut backedges = Vec::new();
+
+        for &block in &component {
+            for &succ in &successors[block] {
+                if block_set.contains(&succ) {
+                    if succ <= block || succ == representative {
+                        backedges.push((block, succ));
+                    }
+                } else {
+                    exits.push(SccExit::new(block, succ));
+                }
+            }
+        }
+
+        for &block in &component {
+            node_to_representative.insert(block, representative);
+        }
+
+        regions.push(SccRegionSummary {
+            representative,
+            blocks: component,
+            exits,
+            backedges,
+        });
+    }
+
+    SccAnalysis {
+        regions,
+        node_to_representative,
     }
 }
 
@@ -137,5 +213,77 @@ pub trait Scc {
             }
             self.on_scc_found(index, &component);
         }
+    }
+}
+
+struct SccComponentCollector {
+    successors: Vec<Vec<usize>>,
+    components: Vec<Vec<usize>>,
+}
+
+impl SccComponentCollector {
+    fn new(successors: Vec<Vec<usize>>) -> Self {
+        Self {
+            successors,
+            components: Vec::new(),
+        }
+    }
+}
+
+impl Scc for SccComponentCollector {
+    fn on_scc_found(&mut self, _root: usize, scc_components: &[usize]) {
+        self.components.push(scc_components.to_vec());
+    }
+
+    fn get_next(&mut self, root: usize) -> FxHashSet<usize> {
+        self.successors
+            .get(root)
+            .into_iter()
+            .flat_map(|successors| successors.iter().copied())
+            .collect()
+    }
+
+    fn get_size(&mut self) -> usize {
+        self.successors.len()
+    }
+}
+
+fn collect_scc_components(successors: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let mut collector = SccComponentCollector::new(successors.to_vec());
+    collector.find_scc();
+    collector.components
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SccExit, analyze_scc_regions};
+
+    #[test]
+    fn analyze_scc_regions_collects_non_trivial_scc_metadata() {
+        let successors = vec![vec![1], vec![2], vec![1, 3], vec![]];
+        let analysis = analyze_scc_regions(&successors);
+
+        assert_eq!(analysis.regions.len(), 1);
+        let region = &analysis.regions[0];
+        assert_eq!(region.representative, 1);
+        assert_eq!(region.blocks, vec![1, 2]);
+        assert_eq!(region.exits, vec![SccExit::new(2, 3)]);
+        assert_eq!(region.backedges, vec![(2, 1)]);
+        assert_eq!(analysis.node_to_representative.get(&1), Some(&1));
+        assert_eq!(analysis.node_to_representative.get(&2), Some(&1));
+    }
+
+    #[test]
+    fn analyze_scc_regions_keeps_self_loop_scc() {
+        let successors = vec![vec![0]];
+        let analysis = analyze_scc_regions(&successors);
+
+        assert_eq!(analysis.regions.len(), 1);
+        let region = &analysis.regions[0];
+        assert_eq!(region.representative, 0);
+        assert_eq!(region.blocks, vec![0]);
+        assert!(region.exits.is_empty());
+        assert_eq!(region.backedges, vec![(0, 0)]);
+        assert_eq!(analysis.node_to_representative.get(&0), Some(&0));
     }
 }

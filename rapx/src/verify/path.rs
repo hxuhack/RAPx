@@ -11,7 +11,7 @@ use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_hir::def_id::DefId;
 use rustc_middle::{mir::BasicBlock, ty::TyCtxt};
 
-use crate::graphs::scc_paths::collect_scc_components;
+use crate::graphs::scc::{SccAnalysis, analyze_scc_regions};
 
 use super::helpers::{CFG, Callsite, CallsiteLocation};
 
@@ -693,18 +693,6 @@ pub struct SccExit {
     pub to: BasicBlock,
 }
 
-/// Return true when `block` contains a non-target callsite.
-fn has_other_callsite(
-    block: BasicBlock,
-    target: CallsiteLocation,
-    by_block: &FxHashMap<BasicBlock, CallsiteLocation>,
-) -> bool {
-    by_block
-        .get(&block)
-        .map(|location| *location != target)
-        .unwrap_or(false)
-}
-
 /// Detect cyclic SCC regions in a CFG.
 fn find_scc_regions(cfg: &CFG) -> (Vec<SccRegion>, FxHashMap<BasicBlock, BasicBlock>) {
     let successors: Vec<Vec<usize>> = cfg
@@ -712,53 +700,50 @@ fn find_scc_regions(cfg: &CFG) -> (Vec<SccRegion>, FxHashMap<BasicBlock, BasicBl
         .iter()
         .map(|nexts| nexts.iter().map(|bb| bb.as_usize()).collect())
         .collect();
-    let components = collect_scc_components(&successors);
+    let analysis = analyze_scc_regions(&successors);
+    lower_scc_analysis(analysis)
+}
 
-    let mut scc_regions = Vec::new();
-    let mut block_to_scc = FxHashMap::default();
-    for mut component in components {
-        component.sort_unstable();
-        let has_self_edge = component.len() == 1
-            && cfg.successors[component[0]]
-                .iter()
-                .any(|succ| succ.as_usize() == component[0]);
-        if component.len() <= 1 && !has_self_edge {
-            continue;
-        }
+/// Convert shared graph-level SCC metadata (`usize`) into verify-layer `BasicBlock` data.
+fn lower_scc_analysis(
+    analysis: SccAnalysis,
+) -> (Vec<SccRegion>, FxHashMap<BasicBlock, BasicBlock>) {
+    let scc_regions = analysis
+        .regions
+        .into_iter()
+        .map(|region| SccRegion {
+            representative: BasicBlock::from_usize(region.representative),
+            blocks: region
+                .blocks
+                .into_iter()
+                .map(BasicBlock::from_usize)
+                .collect(),
+            exits: region
+                .exits
+                .into_iter()
+                .map(|exit| SccExit {
+                    from: BasicBlock::from_usize(exit.exit),
+                    to: BasicBlock::from_usize(exit.to),
+                })
+                .collect(),
+            backedges: region
+                .backedges
+                .into_iter()
+                .map(|(from, to)| (BasicBlock::from_usize(from), BasicBlock::from_usize(to)))
+                .collect(),
+        })
+        .collect();
 
-        let representative = BasicBlock::from_usize(component[0]);
-        let block_set: FxHashSet<usize> = component.iter().copied().collect();
-        let mut exits = Vec::new();
-        let mut backedges = Vec::new();
-
-        for &block_idx in &component {
-            let block = BasicBlock::from_usize(block_idx);
-            for &succ in cfg.successors(block) {
-                let succ_idx = succ.as_usize();
-                if block_set.contains(&succ_idx) {
-                    if succ_idx <= block_idx || succ == representative {
-                        backedges.push((block, succ));
-                    }
-                } else {
-                    exits.push(SccExit {
-                        from: block,
-                        to: succ,
-                    });
-                }
-            }
-        }
-
-        for &block_idx in &component {
-            block_to_scc.insert(BasicBlock::from_usize(block_idx), representative);
-        }
-
-        scc_regions.push(SccRegion {
-            representative,
-            blocks: component.into_iter().map(BasicBlock::from_usize).collect(),
-            exits,
-            backedges,
-        });
-    }
+    let block_to_scc = analysis
+        .node_to_representative
+        .into_iter()
+        .map(|(block, representative)| {
+            (
+                BasicBlock::from_usize(block),
+                BasicBlock::from_usize(representative),
+            )
+        })
+        .collect();
 
     (scc_regions, block_to_scc)
 }
