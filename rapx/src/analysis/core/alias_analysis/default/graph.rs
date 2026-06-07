@@ -3,7 +3,6 @@ use crate::{
     analysis::core::path_analysis::graph::PathGraph,
     graphs::{
         cfg::CfgBlock,
-        path_enumerator::{SccEnumeratedPath, WholeCfgPathEnumerator, enumerate_whole_cfg_paths},
         scc::SccInfo,
     },
     utils::source::*,
@@ -423,7 +422,7 @@ impl<'tcx> AliasGraph<'tcx> {
     }
 
     pub fn enumerate_paths(&mut self) -> Vec<Vec<usize>> {
-        enumerate_whole_cfg_paths(self)
+        self.path_graph.enumerate_paths()
     }
 
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccInfo {
@@ -441,36 +440,6 @@ impl<'tcx> AliasGraph<'tcx> {
 
     pub fn assigned_locals(&self, index: usize) -> Option<&FxHashSet<usize>> {
         self.path_graph.assigned_locals(index)
-    }
-}
-
-impl<'tcx> WholeCfgPathEnumerator for AliasGraph<'tcx> {
-    fn block_count(&self) -> usize {
-        self.path_graph.cfg.blocks.len()
-    }
-
-    fn block_nexts(&self, index: usize) -> Vec<usize> {
-        self.path_graph
-            .cfg
-            .block(index)
-            .next
-            .iter()
-            .copied()
-            .collect()
-    }
-
-    fn block_scc_enter(&self, index: usize) -> usize {
-        self.path_graph.cfg.block(index).scc.enter
-    }
-
-    fn block_has_scc_members(&self, index: usize) -> bool {
-        !self.path_graph.cfg.block(index).scc.nodes.is_empty()
-    }
-
-    fn enumerate_scc_paths_at(&mut self, enter: usize) -> Vec<SccEnumeratedPath> {
-        let cur_scc = self.cfg_block(enter).scc.clone();
-        let scc = self.sort_scc_tree(&cur_scc);
-        self.find_scc_paths(enter, &scc, &FxHashMap::default())
     }
 }
 
