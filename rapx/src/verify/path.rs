@@ -15,11 +15,14 @@ use crate::graphs::scc_paths::collect_scc_components;
 
 use super::helpers::{CFG, Callsite, CallsiteLocation};
 
+const PATH_LIMIT: usize = 1024;
+
 /// Extracts SCC-aware paths for one function body.
 pub struct PathExtractor<'tcx> {
     cfg: CFG,
     callsites: Vec<Callsite<'tcx>>,
     scc_regions: Vec<SccRegion>,
+    scc_region_index_by_representative: FxHashMap<BasicBlock, usize>,
     block_to_scc: FxHashMap<BasicBlock, BasicBlock>,
     paths: FxHashMap<CallsiteLocation, Vec<Path>>,
 }
@@ -31,6 +34,7 @@ impl<'tcx> PathExtractor<'tcx> {
             cfg: CFG::new(tcx, def_id),
             callsites,
             scc_regions: Vec::new(),
+            scc_region_index_by_representative: FxHashMap::default(),
             block_to_scc: FxHashMap::default(),
             paths: FxHashMap::default(),
         }
@@ -49,39 +53,34 @@ impl<'tcx> PathExtractor<'tcx> {
     /// Detect SCC regions in the function CFG and store their block-to-SCC map.
     fn find_scc_regions(&mut self) {
         let (scc_regions, block_to_scc) = find_scc_regions(&self.cfg);
+        self.scc_region_index_by_representative = scc_regions
+            .iter()
+            .enumerate()
+            .map(|(index, scc_info)| (scc_info.representative, index))
+            .collect();
         self.scc_regions = scc_regions;
         self.block_to_scc = block_to_scc;
     }
 
     /// Extract paths for every callsite owned by this extractor.
     fn find_paths(&mut self) {
-        let by_block = self.callsites_by_block();
         for index in 0..self.callsites.len() {
             let callsite = self.callsites[index].clone();
-            let paths = self.find_paths_for_callsite(&callsite, &by_block);
+            let paths = self.find_paths_for_callsite(&callsite);
             self.paths.insert(callsite.location(), paths);
         }
-    }
-
-    /// Build a map from callsite basic blocks to their stable locations.
-    fn callsites_by_block(&self) -> FxHashMap<BasicBlock, CallsiteLocation> {
-        self.callsites
-            .iter()
-            .map(|callsite| (callsite.block, callsite.location()))
-            .collect()
     }
 
     /// Extract paths for one callsite according to whether it is inside an SCC region.
     fn find_paths_for_callsite(
         &self,
         callsite: &Callsite<'tcx>,
-        by_block: &FxHashMap<BasicBlock, CallsiteLocation>,
     ) -> Vec<Path> {
         let target = callsite.location();
         if let Some(representative) = self.block_to_scc.get(&callsite.block).copied() {
             self.find_scc_internal_paths(representative, target, callsite.block)
         } else {
-            self.find_entry_paths(target, callsite.block, by_block)
+            self.find_entry_paths(target, callsite.block)
         }
     }
 
@@ -94,9 +93,7 @@ impl<'tcx> PathExtractor<'tcx> {
         &self,
         target: CallsiteLocation,
         target_block: BasicBlock,
-        by_block: &FxHashMap<BasicBlock, CallsiteLocation>,
     ) -> Vec<Path> {
-        const PATH_LIMIT: usize = 1024;
         let mut results = Vec::new();
         let mut stack = vec![PathStep::Block(self.cfg.entry)];
         let mut visited = FxHashSet::default();
@@ -105,7 +102,6 @@ impl<'tcx> PathExtractor<'tcx> {
             self.cfg.entry,
             target,
             target_block,
-            by_block,
             &mut visited,
             &mut stack,
             &mut results,
@@ -124,7 +120,6 @@ impl<'tcx> PathExtractor<'tcx> {
         current: BasicBlock,
         target: CallsiteLocation,
         target_block: BasicBlock,
-        by_block: &FxHashMap<BasicBlock, CallsiteLocation>,
         visited: &mut FxHashSet<BasicBlock>,
         stack: &mut Vec<PathStep>,
         results: &mut Vec<Path>,
@@ -159,7 +154,6 @@ impl<'tcx> PathExtractor<'tcx> {
                     representative,
                     target,
                     target_block,
-                    by_block,
                     visited,
                     stack,
                     results,
@@ -178,7 +172,6 @@ impl<'tcx> PathExtractor<'tcx> {
                 next,
                 target,
                 target_block,
-                by_block,
                 visited,
                 stack,
                 results,
@@ -198,7 +191,6 @@ impl<'tcx> PathExtractor<'tcx> {
         representative: BasicBlock,
         target: CallsiteLocation,
         target_block: BasicBlock,
-        by_block: &FxHashMap<BasicBlock, CallsiteLocation>,
         visited: &mut FxHashSet<BasicBlock>,
         stack: &mut Vec<PathStep>,
         results: &mut Vec<Path>,
@@ -226,7 +218,6 @@ impl<'tcx> PathExtractor<'tcx> {
                 exit.to,
                 target,
                 target_block,
-                by_block,
                 visited,
                 stack,
                 results,
@@ -250,7 +241,6 @@ impl<'tcx> PathExtractor<'tcx> {
         target: CallsiteLocation,
         target_block: BasicBlock,
     ) -> Vec<Path> {
-        const PATH_LIMIT: usize = 1024;
         let Some(scc_info) = self.scc_by_representative(representative) else {
             return Vec::new();
         };
@@ -278,7 +268,7 @@ impl<'tcx> PathExtractor<'tcx> {
     /// Enumerate finite entry-to-representative prefixes for an SCC-internal callsite.
     ///
     /// SCC-internal paths still need facts established before the first iteration
-    /// iteration, such as `ptr = slice.as_ptr()`.  The returned prefix excludes
+    /// such as `ptr = slice.as_ptr()`. The returned prefix excludes
     /// `representative` itself because the SCC-internal body path already starts there.
     fn find_entry_prefixes(&self, representative: BasicBlock, limit: usize) -> Vec<Vec<PathStep>> {
         if self.cfg.entry == representative {
@@ -466,9 +456,9 @@ impl<'tcx> PathExtractor<'tcx> {
 
     /// Return the detected SCC region whose representative is `representative`.
     fn scc_by_representative(&self, representative: BasicBlock) -> Option<&SccRegion> {
-        self.scc_regions
-            .iter()
-            .find(|scc_info| scc_info.representative == representative)
+        self.scc_region_index_by_representative
+            .get(&representative)
+            .and_then(|index| self.scc_regions.get(*index))
     }
 }
 
@@ -691,18 +681,6 @@ pub struct SccExit {
     pub from: BasicBlock,
     /// Destination block outside the SCC region.
     pub to: BasicBlock,
-}
-
-/// Return true when `block` contains a non-target callsite.
-fn has_other_callsite(
-    block: BasicBlock,
-    target: CallsiteLocation,
-    by_block: &FxHashMap<BasicBlock, CallsiteLocation>,
-) -> bool {
-    by_block
-        .get(&block)
-        .map(|location| *location != target)
-        .unwrap_or(false)
 }
 
 /// Detect cyclic SCC regions in a CFG.
