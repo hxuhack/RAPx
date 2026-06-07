@@ -5,7 +5,9 @@
 //! Concrete analyses define branch feasibility and state updates via hooks.
 //!
 //! It also provides whole-CFG path enumeration via [`enumerate_whole_cfg_paths`]
-//! and the [`WholeCfgPathEnumerator`] trait for reusable internal traversal.
+//! and the [`WholeCfgPathEnumerator`] trait as reusable internal traversal
+//! building blocks for analyses (for example `PathAnalyzer` execution).
+//! Public path-analysis result ownership remains in `PathAnalyzer`.
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_span::def_id::DefId;
