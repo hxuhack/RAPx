@@ -21,6 +21,14 @@ use std::{fmt, vec::Vec};
 #[derive(Clone)]
 pub struct MopGraph<'tcx> {
     pub cfg: ControlFlowGraph<'tcx>,
+    /// Path-sensitive metadata: locals assigned in each block.
+    pub assigned_locals: Vec<FxHashSet<usize>>,
+    /// Path-sensitive state used by alias/safedrop traversal.
+    pub constants: FxHashMap<usize, usize>,
+    /// Mapping from discriminant local to source local used in switch handling.
+    pub discriminants: FxHashMap<usize, usize>,
+    /// Traversal visit counter for recursion limiting.
+    pub visit_times: usize,
     // All values (including fields) of the function.
     // For general variables, we use its Local as the value index;
     // For fields, the value index is determined via auto increment.
@@ -60,6 +68,7 @@ impl<'tcx> MopGraph<'tcx> {
 
         let basicblocks = &body.basic_blocks;
         let mut cfg_blocks = Vec::<CfgBlock<'tcx>>::new();
+        let mut assigned_locals = Vec::<FxHashSet<usize>>::new();
         let mut block_facts = Vec::<AliasBlockFacts<'tcx>>::new();
         let mut discriminants = FxHashMap::default();
 
@@ -67,6 +76,7 @@ impl<'tcx> MopGraph<'tcx> {
         for i in 0..basicblocks.len() {
             let bb = &basicblocks[BasicBlock::from(i)];
             let mut cfg_block = CfgBlock::new(i, bb.is_cleanup);
+            let mut block_assigned_locals = FxHashSet::default();
             let mut alias_block = AliasBlockFacts::new();
 
             // handle general statements
@@ -76,7 +86,7 @@ impl<'tcx> MopGraph<'tcx> {
                     StatementKind::Assign(box (place, rvalue)) => {
                         let lv_place = *place;
                         let lv_local = place.local.as_usize();
-                        cfg_block.assigned_locals.insert(lv_local);
+                        block_assigned_locals.insert(lv_local);
                         match rvalue.clone() {
                             // rvalue is a Rvalue
                             Rvalue::Use(operand) => {
@@ -468,14 +478,18 @@ impl<'tcx> MopGraph<'tcx> {
                 _ => {}
             }
             cfg_blocks.push(cfg_block);
+            assigned_locals.push(block_assigned_locals);
             block_facts.push(alias_block);
         }
 
-        let mut cfg = ControlFlowGraph::new(def_id, tcx, cfg_blocks);
-        cfg.discriminants = discriminants;
+        let cfg = ControlFlowGraph::new(def_id, tcx, cfg_blocks);
 
         MopGraph {
             cfg,
+            assigned_locals,
+            constants: FxHashMap::default(),
+            discriminants,
+            visit_times: 0,
             values,
             block_facts,
             alias_sets: Vec::<FxHashSet<usize>>::new(),
@@ -518,15 +532,42 @@ impl<'tcx> MopGraph<'tcx> {
     }
 
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccInfo {
-        self.cfg.sort_scc_tree(scc)
+        self.populate_child_sccs(scc.enter);
+        self.cfg.block(scc.enter).scc.clone()
     }
 
     pub fn visit_times(&self) -> usize {
-        self.cfg.visit_times()
+        self.visit_times
     }
 
     pub fn increment_visit_times(&mut self) -> usize {
-        self.cfg.increment_visit_times()
+        self.visit_times += 1;
+        self.visit_times
+    }
+
+    pub fn assigned_locals(&self, index: usize) -> Option<&FxHashSet<usize>> {
+        self.assigned_locals.get(index)
+    }
+
+    fn populate_child_sccs(&mut self, enter: usize) {
+        let nodes: Vec<usize> = self.cfg.block(enter).scc.nodes.iter().cloned().collect();
+        let mut child_enters = Vec::new();
+        let mut seen = FxHashSet::default();
+
+        for node in nodes {
+            if let Some(block) = self.cfg.blocks.get(node) {
+                let node_enter = block.scc.enter;
+                let non_trivial = !block.scc.nodes.is_empty();
+                if node_enter != enter && non_trivial && seen.insert(node_enter) {
+                    child_enters.push(node_enter);
+                }
+            }
+        }
+
+        self.cfg.block_mut(enter).scc.child_sccs = child_enters;
+        for &child_enter in &self.cfg.block(enter).scc.child_sccs.clone() {
+            self.populate_child_sccs(child_enter);
+        }
     }
 }
 
@@ -563,8 +604,8 @@ impl<'tcx> std::fmt::Display for MopGraph<'tcx> {
         writeln!(f, "  values: {:?}", self.values)?;
         writeln!(f, "  cfg_blocks: {:?}", self.cfg.blocks)?;
         writeln!(f, "  block_facts: {:?}", self.block_facts)?;
-        writeln!(f, "  constants: {:?}", self.cfg.constants)?;
-        writeln!(f, "  discriminants: {:?}", self.cfg.discriminants)?;
+        writeln!(f, "  constants: {:?}", self.constants)?;
+        writeln!(f, "  discriminants: {:?}", self.discriminants)?;
         write!(f, "}}")
     }
 }

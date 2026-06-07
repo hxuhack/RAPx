@@ -7,7 +7,7 @@ use crate::graphs::{
         enumerate_scc_paths_cached,
     },
 };
-use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::{
     mir::{BasicBlock, Rvalue, StatementKind, TerminatorKind, UnwindAction},
     ty::TyCtxt,
@@ -17,6 +17,10 @@ use rustc_span::def_id::DefId;
 #[derive(Clone)]
 pub struct PathGraph<'tcx> {
     pub cfg: ControlFlowGraph<'tcx>,
+    /// Path-analysis-specific metadata: locals assigned in each block.
+    pub assigned_locals: Vec<FxHashSet<usize>>,
+    /// Path-analysis-specific metadata: discriminant local -> source local mapping.
+    pub discriminants: FxHashMap<usize, usize>,
 }
 
 struct PathSccPathSemantics<'a, 'tcx> {
@@ -24,6 +28,14 @@ struct PathSccPathSemantics<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> SccPathSemantics for PathSccPathSemantics<'a, 'tcx> {
+    fn on_node_enter(&mut self, node: usize, constraints: &mut FxHashMap<usize, usize>) {
+        if let Some(assigned_locals) = self.graph.assigned_locals.get(node) {
+            for local in assigned_locals {
+                constraints.remove(local);
+            }
+        }
+    }
+
     fn enumerate_child_paths(
         &mut self,
         child_enter: usize,
@@ -57,15 +69,17 @@ impl<'tcx> PathGraph<'tcx> {
         let body = tcx.optimized_mir(def_id);
         let basicblocks = &body.basic_blocks;
         let mut cfg_blocks = Vec::<CfgBlock<'tcx>>::new();
+        let mut assigned_locals = Vec::new();
         let mut discriminants = FxHashMap::default();
 
         for i in 0..basicblocks.len() {
             let bb = &basicblocks[BasicBlock::from(i)];
             let mut cfg_block = CfgBlock::new(i, bb.is_cleanup);
+            let mut block_assigned_locals = FxHashSet::default();
 
             for stmt in &bb.statements {
                 if let StatementKind::Assign(box (place, rvalue)) = &stmt.kind {
-                    cfg_block.assigned_locals.insert(place.local.as_usize());
+                    block_assigned_locals.insert(place.local.as_usize());
                     if let Rvalue::Discriminant(rv_place) = rvalue {
                         discriminants.insert(place.local.as_usize(), rv_place.local.as_usize());
                     }
@@ -170,12 +184,16 @@ impl<'tcx> PathGraph<'tcx> {
             }
 
             cfg_blocks.push(cfg_block);
+            assigned_locals.push(block_assigned_locals);
         }
 
-        let mut cfg = ControlFlowGraph::new(def_id, tcx, cfg_blocks);
-        cfg.discriminants = discriminants;
+        let cfg = ControlFlowGraph::new(def_id, tcx, cfg_blocks);
 
-        PathGraph { cfg }
+        PathGraph {
+            cfg,
+            assigned_locals,
+            discriminants,
+        }
     }
 
     pub fn find_scc(&mut self) {
@@ -187,7 +205,8 @@ impl<'tcx> PathGraph<'tcx> {
     }
 
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccInfo {
-        self.cfg.sort_scc_tree(scc)
+        self.populate_child_sccs(scc.enter);
+        self.cfg.block(scc.enter).scc.clone()
     }
 
     pub fn find_scc_paths(
@@ -206,6 +225,27 @@ impl<'tcx> PathGraph<'tcx> {
             &mut semantics,
             SccPathTraversalConfig::default(),
         )
+    }
+
+    fn populate_child_sccs(&mut self, enter: usize) {
+        let nodes: Vec<usize> = self.cfg.block(enter).scc.nodes.iter().cloned().collect();
+        let mut child_enters = Vec::new();
+        let mut seen = FxHashSet::default();
+
+        for node in nodes {
+            if let Some(block) = self.cfg.blocks.get(node) {
+                let node_enter = block.scc.enter;
+                let non_trivial = !block.scc.nodes.is_empty();
+                if node_enter != enter && non_trivial && seen.insert(node_enter) {
+                    child_enters.push(node_enter);
+                }
+            }
+        }
+
+        self.cfg.block_mut(enter).scc.child_sccs = child_enters;
+        for &child_enter in &self.cfg.block(enter).scc.child_sccs.clone() {
+            self.populate_child_sccs(child_enter);
+        }
     }
 }
 
