@@ -1,11 +1,11 @@
 use crate::graphs::{
     cfg::{CfgBlock, ControlFlowGraph},
-    scc::{Scc, SccInfo},
-    scc_paths::{
+    path_enumerator::{
         SccEnumeratedPath, SccPathAction, SccPathSemantics, SccPathTraversalConfig,
-        SccPathTraversalState, WholeCfgPathEnumerator, compute_path_sensitive_paths,
-        enumerate_scc_paths_cached,
+        SccPathTraversalState, WholeCfgPathEnumerator, enumerate_scc_paths_cached,
+        enumerate_whole_cfg_paths,
     },
+    scc::{Scc, SccInfo},
 };
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::{
@@ -225,8 +225,8 @@ impl<'tcx> PathGraph<'tcx> {
         self.assigned_locals.get(index)
     }
 
-    pub fn get_path_sensitive_paths(&mut self) -> Vec<Vec<usize>> {
-        compute_path_sensitive_paths(self)
+    pub fn enumerate_paths(&mut self) -> Vec<Vec<usize>> {
+        enumerate_whole_cfg_paths(self)
     }
 
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccInfo {

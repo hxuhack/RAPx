@@ -1,3 +1,3 @@
 pub mod cfg;
 pub mod scc;
-pub mod scc_paths;
+pub mod path_enumerator;

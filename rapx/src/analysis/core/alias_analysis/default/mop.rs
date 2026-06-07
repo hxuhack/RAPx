@@ -12,11 +12,11 @@ use std::{cell::Cell, collections::HashSet};
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 
 use crate::graphs::{
-    scc::SccInfo,
-    scc_paths::{
+    path_enumerator::{
         SccEnumeratedPath, SccPathAction, SccPathSemantics, SccPathTraversalConfig,
         SccPathTraversalState, enumerate_scc_paths_cached,
     },
+    scc::SccInfo,
 };
 
 use super::value::Value;

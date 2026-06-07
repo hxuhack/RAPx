@@ -3,8 +3,8 @@ use crate::{
     analysis::core::path_analysis::graph::PathGraph,
     graphs::{
         cfg::CfgBlock,
+        path_enumerator::{SccEnumeratedPath, WholeCfgPathEnumerator, enumerate_whole_cfg_paths},
         scc::SccInfo,
-        scc_paths::{SccEnumeratedPath, WholeCfgPathEnumerator, compute_path_sensitive_paths},
     },
     utils::source::*,
 };
@@ -422,8 +422,8 @@ impl<'tcx> AliasGraph<'tcx> {
         self.path_graph.find_scc();
     }
 
-    pub fn get_path_sensitive_paths(&mut self) -> Vec<Vec<usize>> {
-        compute_path_sensitive_paths(self)
+    pub fn enumerate_paths(&mut self) -> Vec<Vec<usize>> {
+        enumerate_whole_cfg_paths(self)
     }
 
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccInfo {
