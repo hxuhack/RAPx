@@ -186,7 +186,8 @@ impl<'tcx> SafeDropGraph<'tcx> {
                 self.drop_record
                     .push(DropRecord::from(new_index, &self.drop_record[lv]));
             }
-            let lv_field_value_idx = *(self.alias_graph.values[lv].fields.get(&rv_field.0).unwrap());
+            let lv_field_value_idx =
+                *(self.alias_graph.values[lv].fields.get(&rv_field.0).unwrap());
 
             rap_debug!(
                 "alias_set_id of rv_field {:?}",
@@ -325,7 +326,9 @@ impl<'tcx> SafeDropGraph<'tcx> {
                 let mut node = Value::new(new_index, left_local, need_drop, may_drop);
                 node.kind = ValueKind::RawPtr;
                 node.father = Some(FatherInfo::new(lv, *index));
-                self.alias_graph.values[lv].fields.insert(*index, node.index);
+                self.alias_graph.values[lv]
+                    .fields
+                    .insert(*index, node.index);
                 self.drop_record
                     .push(DropRecord::from(new_index, &self.drop_record[lv]));
                 self.alias_graph.values.push(node);
@@ -340,7 +343,9 @@ impl<'tcx> SafeDropGraph<'tcx> {
                 let mut node = Value::new(new_index, right_local, need_drop, may_drop);
                 node.kind = ValueKind::RawPtr;
                 node.father = Some(FatherInfo::new(rv, *index));
-                self.alias_graph.values[rv].fields.insert(*index, node.index);
+                self.alias_graph.values[rv]
+                    .fields
+                    .insert(*index, node.index);
                 self.drop_record
                     .push(DropRecord::from(new_index, &self.drop_record[rv]));
                 self.alias_graph.values.push(node);

@@ -81,7 +81,6 @@ impl<'tcx> ControlFlowGraph<'tcx> {
     pub fn block_mut(&mut self, index: usize) -> &mut CfgBlock<'tcx> {
         &mut self.blocks[index]
     }
-
 }
 
 /// Record exits from the SCC root to blocks outside the SCC.
@@ -93,7 +92,11 @@ fn record_root_exits<'tcx>(
     let nexts = graph.block(root).next.clone();
     for next in nexts {
         if !scc_components.contains(&next) {
-            graph.block_mut(root).scc.exits.insert(SccExit::new(root, next));
+            graph
+                .block_mut(root)
+                .scc
+                .exits
+                .insert(SccExit::new(root, next));
         }
     }
 }
@@ -114,7 +117,11 @@ fn record_member_nodes<'tcx>(
         for next in nexts {
             // Any edge leaving the SCC is an SCC exit.
             if !scc_components.contains(&next) {
-                graph.block_mut(root).scc.exits.insert(SccExit::new(node, next));
+                graph
+                    .block_mut(root)
+                    .scc
+                    .exits
+                    .insert(SccExit::new(node, next));
             }
             // Any edge back to the root is tracked as a back edge source.
             if next == root {
@@ -175,11 +182,7 @@ fn rerun_scc_in_isolation<'tcx>(
 
 /// Handle a newly discovered SCC: mark the root, collect membership and edge metadata,
 /// then re-run SCC discovery on an isolated subgraph to populate nested SCC structure.
-fn scc_handler<'tcx>(
-    graph: &mut ControlFlowGraph<'tcx>,
-    root: usize,
-    scc_components: &[usize],
-) {
+fn scc_handler<'tcx>(graph: &mut ControlFlowGraph<'tcx>, root: usize, scc_components: &[usize]) {
     rap_debug!(
         "Scc found: root = {}, components = {:?}",
         root,

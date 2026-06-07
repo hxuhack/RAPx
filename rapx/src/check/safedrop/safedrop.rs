@@ -74,7 +74,10 @@ impl<'tcx> SafeDropGraph<'tcx> {
 
     pub fn drop_heap_item_check(&self, place: &Place<'tcx>) -> bool {
         let tcx = self.alias_graph.tcx();
-        let place_ty = place.ty(&tcx.optimized_mir(self.alias_graph.def_id()).local_decls, tcx);
+        let place_ty = place.ty(
+            &tcx.optimized_mir(self.alias_graph.def_id()).local_decls,
+            tcx,
+        );
         match place_ty.ty.kind() {
             ty::TyKind::Adt(adtdef, ..) => match self.adt_owner.get(&adtdef.did()) {
                 None => true,
@@ -390,7 +393,10 @@ impl<'tcx> SafeDropGraph<'tcx> {
             Some(name) => name,
             None => Symbol::intern("no symbol available"),
         };
-        let body = self.alias_graph.tcx().optimized_mir(self.alias_graph.def_id());
+        let body = self
+            .alias_graph
+            .tcx()
+            .optimized_mir(self.alias_graph.def_id());
         self.bug_records
             .df_bugs_output(body, fn_name, self.alias_graph.span());
         self.bug_records
