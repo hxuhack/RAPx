@@ -4,9 +4,8 @@
 //! propagation, pruning, deduplication, and nested-SCC path splicing.
 //! Concrete analyses define branch feasibility and state updates via hooks.
 //!
-//! It also provides whole-CFG path enumeration via [`compute_path_sensitive_paths`]
-//! and the [`WholeCfgPathEnumerator`] trait, which is the unified entry point for
-//! downstream consumers such as range analysis and Senryx.
+//! It also provides whole-CFG path enumeration via [`enumerate_whole_cfg_paths`]
+//! and the [`WholeCfgPathEnumerator`] trait for reusable internal traversal.
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_span::def_id::DefId;
@@ -564,7 +563,7 @@ impl Scc for SccComponentCollector {
 
 /// Trait abstracting the CFG + SCC operations needed by whole-CFG path enumeration.
 ///
-/// Implement this trait for your graph type to use [`compute_path_sensitive_paths`].
+/// Implement this trait for your graph type to use [`enumerate_whole_cfg_paths`].
 pub trait WholeCfgPathEnumerator {
     /// Total number of CFG blocks.
     fn block_count(&self) -> usize;
@@ -585,14 +584,13 @@ pub trait WholeCfgPathEnumerator {
     fn enumerate_scc_paths_at(&mut self, enter: usize) -> Vec<SccEnumeratedPath>;
 }
 
-/// Compute all path-sensitive paths for a whole CFG.
+/// Enumerate all path-sensitive paths for a whole CFG.
 ///
-/// This is the **unified entry point** for downstream consumers such as
-/// range analysis and Senryx.  All SCC-internal loops are expanded via
+/// All SCC-internal loops are expanded via
 /// [`WholeCfgPathEnumerator::enumerate_scc_paths_at`] so that the
 /// returned paths contain the full block sequence for each feasible
 /// execution.
-pub fn compute_path_sensitive_paths<G: WholeCfgPathEnumerator>(graph: &mut G) -> Vec<Vec<usize>> {
+pub fn enumerate_whole_cfg_paths<G: WholeCfgPathEnumerator>(graph: &mut G) -> Vec<Vec<usize>> {
     let mut all_paths = Vec::new();
     let mut seen_paths = FxHashSet::default();
 
