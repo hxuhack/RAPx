@@ -42,7 +42,8 @@ impl<'a, 'tcx> SccPathSemantics for PathSccPathSemantics<'a, 'tcx> {
         constraints: &FxHashMap<usize, usize>,
     ) -> Vec<SccEnumeratedPath> {
         let child_scc = self.graph.cfg.block(child_enter).scc.clone();
-        self.graph.find_scc_paths(child_enter, &child_scc, constraints)
+        self.graph
+            .find_scc_paths(child_enter, &child_scc, constraints)
     }
 
     fn enumerate_actions(

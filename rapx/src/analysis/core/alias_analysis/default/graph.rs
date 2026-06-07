@@ -10,9 +10,7 @@ use crate::{
 };
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::{
-    mir::{
-        AggregateKind, BasicBlock, Const, Operand, Rvalue, StatementKind,
-    },
+    mir::{AggregateKind, BasicBlock, Const, Operand, Rvalue, StatementKind},
     ty::{self, TyCtxt, TypingEnv},
 };
 use rustc_span::{Span, def_id::DefId};
@@ -447,7 +445,13 @@ impl<'tcx> WholeCfgPathEnumerator for AliasGraph<'tcx> {
     }
 
     fn block_nexts(&self, index: usize) -> Vec<usize> {
-        self.path_graph.cfg.block(index).next.iter().copied().collect()
+        self.path_graph
+            .cfg
+            .block(index)
+            .next
+            .iter()
+            .copied()
+            .collect()
     }
 
     fn block_scc_enter(&self, index: usize) -> usize {

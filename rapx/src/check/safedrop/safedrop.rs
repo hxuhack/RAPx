@@ -252,8 +252,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
                         match place_ty.ty.kind() {
                             ty::TyKind::Bool => {
                                 rap_debug!("SwitchInt via Bool");
-                                if let Some(constant) = self.mop_graph.constants.get(&value_idx)
-                                {
+                                if let Some(constant) = self.mop_graph.constants.get(&value_idx) {
                                     if *constant != usize::MAX {
                                         single_target = true;
                                         sw_val = *constant;
@@ -269,8 +268,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
                                     .discriminants
                                     .get(&self.mop_graph.values[value_idx].local)
                                 {
-                                    if let Some(constant) = self.mop_graph.constants.get(father)
-                                    {
+                                    if let Some(constant) = self.mop_graph.constants.get(father) {
                                         if *constant != usize::MAX {
                                             single_target = true;
                                             sw_val = *constant;

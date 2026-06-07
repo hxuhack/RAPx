@@ -7,10 +7,7 @@ use rustc_middle::{
     ty::{TyKind, TypingEnv},
 };
 
-use std::{
-    cell::Cell,
-    collections::HashSet,
-};
+use std::{cell::Cell, collections::HashSet};
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 
@@ -22,8 +19,8 @@ use crate::graphs::{
     },
 };
 
-use super::{graph::*, *};
 use super::value::Value;
+use super::{graph::*, *};
 
 /// rustc analysis threads can have a relatively small stack.
 ///
@@ -43,7 +40,9 @@ struct MopStateSnapshot {
 
 enum SwitchSuccessorPlan {
     NotSwitch,
-    SingleTarget { target: usize },
+    SingleTarget {
+        target: usize,
+    },
     SplitTargets {
         constraint_id: usize,
         targets: rustc_middle::mir::SwitchTargets,
@@ -351,8 +350,7 @@ impl<'tcx> AliasGraph<'tcx> {
                             .path_graph
                             .discriminants
                             .get(&self.values[value_idx].local)?;
-                        self
-                            .constants
+                        self.constants
                             .get(father)
                             .copied()
                             .filter(|c| *c != usize::MAX)
