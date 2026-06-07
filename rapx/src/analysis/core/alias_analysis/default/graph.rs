@@ -1,8 +1,9 @@
 use super::{MopFnAliasPairs, assign::*, block::*, types::*, value::*};
 use crate::{
+    analysis::core::path_analysis::graph::PathGraph,
     graphs::{
-        cfg::{CfgBlock, ControlFlowGraph},
-        scc::{Scc, SccInfo},
+        cfg::CfgBlock,
+        scc::SccInfo,
         scc_paths::{SccEnumeratedPath, WholeCfgPathEnumerator, compute_path_sensitive_paths},
     },
     utils::source::*,
@@ -10,8 +11,7 @@ use crate::{
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_middle::{
     mir::{
-        AggregateKind, BasicBlock, Const, Operand, Rvalue, StatementKind, TerminatorKind,
-        UnwindAction,
+        AggregateKind, BasicBlock, Const, Operand, Rvalue, StatementKind,
     },
     ty::{self, TyCtxt, TypingEnv},
 };
@@ -19,14 +19,10 @@ use rustc_span::{Span, def_id::DefId};
 use std::{fmt, vec::Vec};
 
 #[derive(Clone)]
-pub struct MopGraph<'tcx> {
-    pub cfg: ControlFlowGraph<'tcx>,
-    /// Path-sensitive metadata: locals assigned in each block.
-    pub assigned_locals: Vec<FxHashSet<usize>>,
+pub struct AliasGraph<'tcx> {
+    pub path_graph: PathGraph<'tcx>,
     /// Path-sensitive state used by alias/safedrop traversal.
     pub constants: FxHashMap<usize, usize>,
-    /// Mapping from discriminant local to source local used in switch handling.
-    pub discriminants: FxHashMap<usize, usize>,
     /// Traversal visit counter for recursion limiting.
     pub visit_times: usize,
     // All values (including fields) of the function.
@@ -42,10 +38,13 @@ pub struct MopGraph<'tcx> {
     pub span: Span,
 }
 
-impl<'tcx> MopGraph<'tcx> {
-    pub fn new(tcx: TyCtxt<'tcx>, def_id: DefId) -> MopGraph<'tcx> {
+pub type MopGraph<'tcx> = AliasGraph<'tcx>;
+
+impl<'tcx> AliasGraph<'tcx> {
+    pub fn new(tcx: TyCtxt<'tcx>, def_id: DefId) -> AliasGraph<'tcx> {
         let fn_name = get_fn_name(tcx, def_id);
-        rap_debug!("New a MopGraph for: {:?}", fn_name);
+        rap_debug!("New an AliasGraph for: {:?}", fn_name);
+        let path_graph = PathGraph::new(tcx, def_id);
         // handle variables
         let body = tcx.optimized_mir(def_id);
         //display_mir(def_id, body);
@@ -67,16 +66,11 @@ impl<'tcx> MopGraph<'tcx> {
         }
 
         let basicblocks = &body.basic_blocks;
-        let mut cfg_blocks = Vec::<CfgBlock<'tcx>>::new();
-        let mut assigned_locals = Vec::<FxHashSet<usize>>::new();
         let mut block_facts = Vec::<AliasBlockFacts<'tcx>>::new();
-        let mut discriminants = FxHashMap::default();
 
         // handle each basicblock
         for i in 0..basicblocks.len() {
             let bb = &basicblocks[BasicBlock::from(i)];
-            let mut cfg_block = CfgBlock::new(i, bb.is_cleanup);
-            let mut block_assigned_locals = FxHashSet::default();
             let mut alias_block = AliasBlockFacts::new();
 
             // handle general statements
@@ -86,7 +80,6 @@ impl<'tcx> MopGraph<'tcx> {
                     StatementKind::Assign(box (place, rvalue)) => {
                         let lv_place = *place;
                         let lv_local = place.local.as_usize();
-                        block_assigned_locals.insert(lv_local);
                         match rvalue.clone() {
                             // rvalue is a Rvalue
                             Rvalue::Use(operand) => {
@@ -360,7 +353,6 @@ impl<'tcx> MopGraph<'tcx> {
                                 let assign =
                                     Assignment::new(lv_place, rv_place, AssignType::Variant, span);
                                 alias_block.assignments.push(assign);
-                                discriminants.insert(lv_local, rv_place.local.as_usize());
                             }
                             _ => {}
                         }
@@ -375,120 +367,20 @@ impl<'tcx> MopGraph<'tcx> {
                 }
             }
 
-            let Some(terminator) = &bb.terminator else {
+            if bb.terminator.is_none() {
                 rap_info!(
                     "Basic block BB{} has no terminator in function {:?}",
                     i,
                     fn_name
                 );
                 continue;
-            };
-            cfg_block.terminator = Some(terminator.clone());
-            // handle terminator statements
-            match terminator.kind.clone() {
-                TerminatorKind::Goto { ref target } => {
-                    cfg_block.add_next(target.as_usize());
-                }
-                TerminatorKind::SwitchInt {
-                    discr: _,
-                    ref targets,
-                } => {
-                    for (_, ref target) in targets.iter() {
-                        cfg_block.add_next(target.as_usize());
-                    }
-                    cfg_block.add_next(targets.otherwise().as_usize());
-                }
-                TerminatorKind::Drop {
-                    place: _,
-                    target,
-                    unwind,
-                    replace: _,
-                    drop: _,
-                    async_fut: _,
-                } => {
-                    cfg_block.add_next(target.as_usize());
-                    if let UnwindAction::Cleanup(target) = unwind {
-                        cfg_block.add_next(target.as_usize());
-                    }
-                }
-                TerminatorKind::Call {
-                    ref target,
-                    ref unwind,
-                    ..
-                } => {
-                    if let Some(tt) = target {
-                        cfg_block.add_next(tt.as_usize());
-                    }
-                    if let UnwindAction::Cleanup(tt) = unwind {
-                        cfg_block.add_next(tt.as_usize());
-                    }
-                }
-
-                TerminatorKind::Assert {
-                    cond: _,
-                    expected: _,
-                    msg: _,
-                    ref target,
-                    ref unwind,
-                } => {
-                    cfg_block.add_next(target.as_usize());
-                    if let UnwindAction::Cleanup(target) = unwind {
-                        cfg_block.add_next(target.as_usize());
-                    }
-                }
-                TerminatorKind::Yield {
-                    value: _,
-                    ref resume,
-                    resume_arg: _,
-                    ref drop,
-                } => {
-                    cfg_block.add_next(resume.as_usize());
-                    if let Some(target) = drop {
-                        cfg_block.add_next(target.as_usize());
-                    }
-                }
-                TerminatorKind::FalseEdge {
-                    ref real_target,
-                    imaginary_target: _,
-                } => {
-                    cfg_block.add_next(real_target.as_usize());
-                }
-                TerminatorKind::FalseUnwind {
-                    ref real_target,
-                    unwind: _,
-                } => {
-                    cfg_block.add_next(real_target.as_usize());
-                }
-                TerminatorKind::InlineAsm {
-                    template: _,
-                    operands: _,
-                    options: _,
-                    line_spans: _,
-                    ref unwind,
-                    targets,
-                    asm_macro: _,
-                } => {
-                    for target in targets {
-                        cfg_block.add_next(target.as_usize());
-                    }
-                    if let UnwindAction::Cleanup(target) = unwind {
-                        cfg_block.add_next(target.as_usize());
-                    }
-                }
-                _ => {}
             }
-            cfg_blocks.push(cfg_block);
-            assigned_locals.push(block_assigned_locals);
             block_facts.push(alias_block);
         }
 
-        let cfg = ControlFlowGraph::new(def_id, tcx, cfg_blocks);
-
-        MopGraph {
-            cfg,
-            assigned_locals,
+        AliasGraph {
+            path_graph,
             constants: FxHashMap::default(),
-            discriminants,
             visit_times: 0,
             values,
             block_facts,
@@ -500,11 +392,11 @@ impl<'tcx> MopGraph<'tcx> {
     }
 
     pub fn def_id(&self) -> DefId {
-        self.cfg.def_id
+        self.path_graph.def_id()
     }
 
     pub fn tcx(&self) -> TyCtxt<'tcx> {
-        self.cfg.tcx
+        self.path_graph.tcx()
     }
 
     pub fn arg_size(&self) -> usize {
@@ -516,15 +408,15 @@ impl<'tcx> MopGraph<'tcx> {
     }
 
     pub fn cfg_block(&self, index: usize) -> &CfgBlock<'tcx> {
-        self.cfg.block(index)
+        self.path_graph.cfg_block(index)
     }
 
     pub fn cfg_block_mut(&mut self, index: usize) -> &mut CfgBlock<'tcx> {
-        self.cfg.block_mut(index)
+        self.path_graph.cfg_block_mut(index)
     }
 
     pub fn find_scc(&mut self) {
-        self.cfg.find_scc();
+        self.path_graph.find_scc();
     }
 
     pub fn get_path_sensitive_paths(&mut self) -> Vec<Vec<usize>> {
@@ -532,8 +424,7 @@ impl<'tcx> MopGraph<'tcx> {
     }
 
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccInfo {
-        self.populate_child_sccs(scc.enter);
-        self.cfg.block(scc.enter).scc.clone()
+        self.path_graph.sort_scc_tree(scc)
     }
 
     pub fn visit_times(&self) -> usize {
@@ -546,46 +437,25 @@ impl<'tcx> MopGraph<'tcx> {
     }
 
     pub fn assigned_locals(&self, index: usize) -> Option<&FxHashSet<usize>> {
-        self.assigned_locals.get(index)
-    }
-
-    fn populate_child_sccs(&mut self, enter: usize) {
-        let nodes: Vec<usize> = self.cfg.block(enter).scc.nodes.iter().cloned().collect();
-        let mut child_enters = Vec::new();
-        let mut seen = FxHashSet::default();
-
-        for node in nodes {
-            if let Some(block) = self.cfg.blocks.get(node) {
-                let node_enter = block.scc.enter;
-                let non_trivial = !block.scc.nodes.is_empty();
-                if node_enter != enter && non_trivial && seen.insert(node_enter) {
-                    child_enters.push(node_enter);
-                }
-            }
-        }
-
-        self.cfg.block_mut(enter).scc.child_sccs = child_enters;
-        for &child_enter in &self.cfg.block(enter).scc.child_sccs.clone() {
-            self.populate_child_sccs(child_enter);
-        }
+        self.path_graph.assigned_locals(index)
     }
 }
 
-impl<'tcx> WholeCfgPathEnumerator for MopGraph<'tcx> {
+impl<'tcx> WholeCfgPathEnumerator for AliasGraph<'tcx> {
     fn block_count(&self) -> usize {
-        self.cfg.blocks.len()
+        self.path_graph.cfg.blocks.len()
     }
 
     fn block_nexts(&self, index: usize) -> Vec<usize> {
-        self.cfg.block(index).next.iter().copied().collect()
+        self.path_graph.cfg.block(index).next.iter().copied().collect()
     }
 
     fn block_scc_enter(&self, index: usize) -> usize {
-        self.cfg.block(index).scc.enter
+        self.path_graph.cfg.block(index).scc.enter
     }
 
     fn block_has_scc_members(&self, index: usize) -> bool {
-        !self.cfg.block(index).scc.nodes.is_empty()
+        !self.path_graph.cfg.block(index).scc.nodes.is_empty()
     }
 
     fn enumerate_scc_paths_at(&mut self, enter: usize) -> Vec<SccEnumeratedPath> {
@@ -597,15 +467,15 @@ impl<'tcx> WholeCfgPathEnumerator for MopGraph<'tcx> {
 
 // Implement Display for debugging / printing purposes.
 // Prints selected fields: def_id, values, blocks, constants, discriminants, scc_indices, child_scc.
-impl<'tcx> std::fmt::Display for MopGraph<'tcx> {
+impl<'tcx> std::fmt::Display for AliasGraph<'tcx> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "MopGraph {{")?;
+        writeln!(f, "AliasGraph {{")?;
         writeln!(f, "  def_id: {:?}", self.def_id())?;
         writeln!(f, "  values: {:?}", self.values)?;
-        writeln!(f, "  cfg_blocks: {:?}", self.cfg.blocks)?;
+        writeln!(f, "  cfg_blocks: {:?}", self.path_graph.cfg.blocks)?;
         writeln!(f, "  block_facts: {:?}", self.block_facts)?;
         writeln!(f, "  constants: {:?}", self.constants)?;
-        writeln!(f, "  discriminants: {:?}", self.discriminants)?;
+        writeln!(f, "  discriminants: {:?}", self.path_graph.discriminants)?;
         write!(f, "}}")
     }
 }

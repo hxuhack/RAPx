@@ -265,6 +265,7 @@ impl<'tcx> SafeDropGraph<'tcx> {
                             _ => {
                                 if let Some(father) = self
                                     .mop_graph
+                                    .path_graph
                                     .discriminants
                                     .get(&self.mop_graph.values[value_idx].local)
                                 {

@@ -200,6 +200,26 @@ impl<'tcx> PathGraph<'tcx> {
         self.cfg.find_scc();
     }
 
+    pub fn def_id(&self) -> DefId {
+        self.cfg.def_id
+    }
+
+    pub fn tcx(&self) -> TyCtxt<'tcx> {
+        self.cfg.tcx
+    }
+
+    pub fn cfg_block(&self, index: usize) -> &CfgBlock<'tcx> {
+        self.cfg.block(index)
+    }
+
+    pub fn cfg_block_mut(&mut self, index: usize) -> &mut CfgBlock<'tcx> {
+        self.cfg.block_mut(index)
+    }
+
+    pub fn assigned_locals(&self, index: usize) -> Option<&FxHashSet<usize>> {
+        self.assigned_locals.get(index)
+    }
+
     pub fn get_path_sensitive_paths(&mut self) -> Vec<Vec<usize>> {
         compute_path_sensitive_paths(self)
     }

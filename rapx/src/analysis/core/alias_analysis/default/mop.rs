@@ -83,7 +83,7 @@ impl Drop for DepthLimitGuard {
 }
 
 struct MopSccPathSemantics<'a, 'tcx> {
-    graph: &'a mut MopGraph<'tcx>,
+    graph: &'a mut AliasGraph<'tcx>,
 }
 
 impl<'a, 'tcx> SccPathSemantics for MopSccPathSemantics<'a, 'tcx> {
@@ -131,6 +131,7 @@ impl<'a, 'tcx> SccPathSemantics for MopSccPathSemantics<'a, 'tcx> {
             let dest_idx = self.graph.projection(*destination);
             let dest_local = self
                 .graph
+                .path_graph
                 .discriminants
                 .get(&self.graph.values[dest_idx].local)
                 .cloned()
@@ -152,6 +153,7 @@ impl<'a, 'tcx> SccPathSemantics for MopSccPathSemantics<'a, 'tcx> {
 
                 let discr_local = self
                     .graph
+                    .path_graph
                     .discriminants
                     .get(&self.graph.values[place].local)
                     .cloned()
@@ -242,7 +244,7 @@ impl<'a, 'tcx> SccPathSemantics for MopSccPathSemantics<'a, 'tcx> {
     }
 }
 
-impl<'tcx> MopGraph<'tcx> {
+impl<'tcx> AliasGraph<'tcx> {
     fn switch_target_for_value(
         &self,
         targets: &rustc_middle::mir::SwitchTargets,
@@ -345,7 +347,10 @@ impl<'tcx> MopGraph<'tcx> {
                         .copied()
                         .filter(|c| *c != usize::MAX),
                     _ => {
-                        let father = self.discriminants.get(&self.values[value_idx].local)?;
+                        let father = self
+                            .path_graph
+                            .discriminants
+                            .get(&self.values[value_idx].local)?;
                         self
                             .constants
                             .get(father)
@@ -381,7 +386,10 @@ impl<'tcx> MopGraph<'tcx> {
                 match place_ty.ty.kind() {
                     TyKind::Bool => Some(value_idx),
                     _ => {
-                        let father = self.discriminants.get(&self.values[value_idx].local)?;
+                        let father = self
+                            .path_graph
+                            .discriminants
+                            .get(&self.values[value_idx].local)?;
                         (self.values[value_idx].local == value_idx).then_some(*father)
                     }
                 }
@@ -495,6 +503,7 @@ impl<'tcx> MopGraph<'tcx> {
         }?;
 
         let discr_local = self
+            .path_graph
             .discriminants
             .get(&self.values[place].local)
             .cloned()

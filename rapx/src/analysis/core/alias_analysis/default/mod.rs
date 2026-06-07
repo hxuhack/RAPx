@@ -8,7 +8,7 @@ pub mod value;
 
 use super::{AliasAnalysis, AliasPair, FnAliasMap, FnAliasPairs};
 use crate::{analysis::Analysis, def_id::*, utils::source::*};
-use graph::MopGraph;
+use graph::AliasGraph;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::TyCtxt;
@@ -258,7 +258,7 @@ impl<'tcx> AliasAnalyzer<'tcx> {
         }
 
         if self.tcx.is_mir_available(def_id) {
-            let mut mop_graph = MopGraph::new(self.tcx, def_id);
+            let mut mop_graph = AliasGraph::new(self.tcx, def_id);
             rap_debug!("Mop graph crated: {}", mop_graph);
             rap_debug!("Search scc components in the graph.");
             mop_graph.find_scc();
