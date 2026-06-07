@@ -322,6 +322,16 @@ where
 
         rap_debug!("PHASE 2 Complete. Interval analysis finished for call chain start functions.");
     }
+
+    /// Extract path-sensitive CFG paths for a function.
+    /// This is intentionally separate from downstream analyses (e.g. path constraints),
+    /// so other analyses can reuse the same path extraction flow.
+    fn extract_path_sensitive_paths(&self, def_id: DefId) -> Vec<Vec<usize>> {
+        let mut graph = MopGraph::new(self.tcx, def_id);
+        graph.find_scc();
+        graph.get_path_sensitive_paths()
+    }
+
     pub fn start_path_constraints_analysis_for_defid(
         &mut self,
         def_id: DefId,
@@ -332,9 +342,7 @@ where
 
             let mut cg: ConstraintGraph<'tcx, T> =
                 ConstraintGraph::new_without_ssa(body_mut_ref, self.tcx, def_id);
-            let mut graph = MopGraph::new(self.tcx, def_id);
-            graph.find_scc();
-            let paths: Vec<Vec<usize>> = graph.get_path_sensitive_paths();
+            let paths = self.extract_path_sensitive_paths(def_id);
             let result = cg.start_analyze_path_constraints(body_mut_ref, &paths);
             rap_debug!(
                 "Paths for function {}: {:?}",
@@ -369,9 +377,7 @@ where
 
                     let mut cg: ConstraintGraph<'tcx, T> =
                         ConstraintGraph::new_without_ssa(body_mut_ref, self.tcx, def_id);
-                    let mut graph = MopGraph::new(self.tcx, def_id);
-                    graph.find_scc();
-                    let paths: Vec<Vec<usize>> = graph.get_path_sensitive_paths();
+                    let paths = self.extract_path_sensitive_paths(def_id);
                     let result = cg.start_analyze_path_constraints(body_mut_ref, &paths);
                     rap_debug!(
                         "Paths for function {}: {:?}",
