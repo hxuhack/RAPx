@@ -1,7 +1,11 @@
 use crate::graphs::{
     cfg::{CfgBlock, ControlFlowGraph},
     scc::{Scc, SccInfo},
-    scc_paths::{SccEnumeratedPath, WholeCfgPathEnumerator, compute_path_sensitive_paths},
+    scc_paths::{
+        SccEnumeratedPath, SccPathAction, SccPathSemantics, SccPathTraversalConfig,
+        SccPathTraversalState, WholeCfgPathEnumerator, compute_path_sensitive_paths,
+        enumerate_scc_paths_cached,
+    },
 };
 use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::{
@@ -13,6 +17,39 @@ use rustc_span::def_id::DefId;
 #[derive(Clone)]
 pub struct PathGraph<'tcx> {
     pub cfg: ControlFlowGraph<'tcx>,
+}
+
+struct PathSccPathSemantics<'a, 'tcx> {
+    graph: &'a mut PathGraph<'tcx>,
+}
+
+impl<'a, 'tcx> SccPathSemantics for PathSccPathSemantics<'a, 'tcx> {
+    fn enumerate_child_paths(
+        &mut self,
+        child_enter: usize,
+        constraints: &FxHashMap<usize, usize>,
+    ) -> Vec<SccEnumeratedPath> {
+        let child_scc = self.graph.cfg.block(child_enter).scc.clone();
+        self.graph.find_scc_paths(child_enter, &child_scc, constraints)
+    }
+
+    fn enumerate_actions(
+        &mut self,
+        _scc: &SccInfo,
+        state: &SccPathTraversalState,
+        constraints: &FxHashMap<usize, usize>,
+    ) -> Vec<SccPathAction> {
+        let mut actions = vec![SccPathAction::RecordExit {
+            constraints: constraints.clone(),
+        }];
+        for next in self.graph.cfg.block(state.cur).next.clone() {
+            actions.push(SccPathAction::Traverse {
+                next,
+                constraints: constraints.clone(),
+            });
+        }
+        actions
+    }
 }
 
 impl<'tcx> PathGraph<'tcx> {
@@ -152,6 +189,24 @@ impl<'tcx> PathGraph<'tcx> {
     pub fn sort_scc_tree(&mut self, scc: &SccInfo) -> SccInfo {
         self.cfg.sort_scc_tree(scc)
     }
+
+    pub fn find_scc_paths(
+        &mut self,
+        start: usize,
+        scc: &SccInfo,
+        initial_constraints: &FxHashMap<usize, usize>,
+    ) -> Vec<SccEnumeratedPath> {
+        let def_id = self.cfg.def_id;
+        let mut semantics = PathSccPathSemantics { graph: self };
+        enumerate_scc_paths_cached(
+            def_id,
+            start,
+            scc,
+            initial_constraints.clone(),
+            &mut semantics,
+            SccPathTraversalConfig::default(),
+        )
+    }
 }
 
 impl<'tcx> WholeCfgPathEnumerator for PathGraph<'tcx> {
@@ -174,6 +229,6 @@ impl<'tcx> WholeCfgPathEnumerator for PathGraph<'tcx> {
     fn enumerate_scc_paths_at(&mut self, enter: usize) -> Vec<SccEnumeratedPath> {
         let cur_scc = self.cfg.block(enter).scc.clone();
         let scc = self.sort_scc_tree(&cur_scc);
-        self.cfg.find_scc_paths(enter, &scc, &FxHashMap::default())
+        self.find_scc_paths(enter, &scc, &FxHashMap::default())
     }
 }
