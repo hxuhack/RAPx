@@ -5,7 +5,7 @@
 //! agnostic: clients provide successor queries and receive each discovered SCC
 //! through `on_scc_found`.
 
-use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use std::cmp;
 
 /// An outgoing edge from an SCC body to a block outside the SCC.
@@ -33,6 +33,8 @@ pub struct SccInfo {
     pub exits: FxHashSet<SccExit>,
     /// Blocks with back edges to the SCC representative.
     pub backnodes: FxHashSet<usize>,
+    /// Back edges inside the SCC body.
+    pub backedges: FxHashSet<(usize, usize)>,
     /// Representative `enter` nodes of nested child SCCs.
     pub child_sccs: Vec<usize>,
 }
@@ -45,6 +47,7 @@ impl SccInfo {
             nodes: FxHashSet::default(),
             exits: FxHashSet::default(),
             backnodes: FxHashSet::default(),
+            backedges: FxHashSet::default(),
             child_sccs: Vec::new(),
         }
     }
@@ -54,6 +57,83 @@ impl SccInfo {
     /// A trivial SCC has no loops and requires no special path enumeration.
     pub fn is_trivial(&self) -> bool {
         self.nodes.is_empty()
+    }
+}
+
+/// Analyze cyclic SCC regions and return shared SCC metadata.
+///
+/// The returned `Vec<SccInfo>` is the reusable SCC metadata model, and the map
+/// associates each node with its SCC representative (`SccInfo::enter`).
+pub fn analyze_scc_regions(successors: &[Vec<usize>]) -> (Vec<SccInfo>, FxHashMap<usize, usize>) {
+    let mut collector = SccComponentCollector::new(successors.to_vec());
+    collector.find_scc();
+
+    let mut regions = Vec::new();
+    let mut node_to_scc = FxHashMap::default();
+    for mut component in collector.components {
+        component.sort_unstable();
+        let enter = component[0];
+        let has_self_edge = component.len() == 1 && successors[enter].iter().any(|&next| next == enter);
+        if component.len() <= 1 && !has_self_edge {
+            continue;
+        }
+
+        let members: FxHashSet<usize> = component.iter().copied().collect();
+        let mut scc_info = SccInfo::new(enter);
+        for &node in component.iter().skip(1) {
+            scc_info.nodes.insert(node);
+        }
+
+        for &node in &component {
+            for &next in &successors[node] {
+                if members.contains(&next) {
+                    if next <= node || next == enter {
+                        scc_info.backedges.insert((node, next));
+                    }
+                    if next == enter {
+                        scc_info.backnodes.insert(node);
+                    }
+                } else {
+                    scc_info.exits.insert(SccExit::new(node, next));
+                }
+            }
+            node_to_scc.insert(node, enter);
+        }
+        regions.push(scc_info);
+    }
+
+    (regions, node_to_scc)
+}
+
+struct SccComponentCollector {
+    successors: Vec<Vec<usize>>,
+    components: Vec<Vec<usize>>,
+}
+
+impl SccComponentCollector {
+    fn new(successors: Vec<Vec<usize>>) -> Self {
+        Self {
+            successors,
+            components: Vec::new(),
+        }
+    }
+}
+
+impl Scc for SccComponentCollector {
+    fn on_scc_found(&mut self, _root: usize, scc_components: &[usize]) {
+        self.components.push(scc_components.to_vec());
+    }
+
+    fn get_next(&mut self, root: usize) -> FxHashSet<usize> {
+        self.successors
+            .get(root)
+            .into_iter()
+            .flat_map(|successors| successors.iter().copied())
+            .collect()
+    }
+
+    fn get_size(&mut self) -> usize {
+        self.successors.len()
     }
 }
 
