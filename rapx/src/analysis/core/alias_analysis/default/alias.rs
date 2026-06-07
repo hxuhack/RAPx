@@ -88,10 +88,10 @@ impl<'tcx> AliasGraph<'tcx> {
                             return;
                         }
                         recursion_set.insert(target_id);
-                        let mut mop_graph = AliasGraph::new(self.tcx(), target_id);
-                        mop_graph.find_scc();
-                        mop_graph.check(0, fn_map, recursion_set);
-                        let ret_alias = mop_graph.ret_alias.clone();
+                        let mut alias_graph = AliasGraph::new(self.tcx(), target_id);
+                        alias_graph.find_scc();
+                        alias_graph.check(0, fn_map, recursion_set);
+                        let ret_alias = alias_graph.ret_alias.clone();
                         rap_debug!("Find aliases of {:?}: {:?}", target_id, ret_alias);
                         fn_map.insert(target_id, ret_alias);
                         recursion_set.remove(&target_id);
