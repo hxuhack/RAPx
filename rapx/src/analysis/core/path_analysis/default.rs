@@ -22,7 +22,7 @@ impl<'tcx> PathAnalyzer<'tcx> {
         }
     }
 
-    pub fn start_path_analysis_for_defid(&self, def_id: DefId) -> Option<PathSet> {
+    fn compute_paths_for_defid(&self, def_id: DefId) -> Option<PathSet> {
         if !self.tcx.is_mir_available(def_id) {
             return None;
         }
@@ -42,6 +42,16 @@ impl<'tcx> PathAnalyzer<'tcx> {
         Some(paths)
     }
 
+    pub fn start_path_analysis_for_defid(&mut self, def_id: DefId) -> Option<PathSet> {
+        if let Some(paths) = self.paths.get(&def_id) {
+            return Some(paths.clone());
+        }
+
+        let paths = self.compute_paths_for_defid(def_id)?;
+        self.paths.insert(def_id, paths.clone());
+        Some(paths)
+    }
+
     pub fn get_fn_paths(&self, def_id: DefId) -> Option<PathSet> {
         self.paths.get(&def_id).cloned()
     }
@@ -54,9 +64,7 @@ impl<'tcx> PathAnalyzer<'tcx> {
         for local_def_id in self.tcx.iter_local_def_id() {
             if matches!(self.tcx.def_kind(local_def_id), DefKind::Fn) {
                 let def_id = local_def_id.to_def_id();
-                if let Some(paths) = self.start_path_analysis_for_defid(def_id) {
-                    self.paths.insert(def_id, paths);
-                }
+                let _ = self.start_path_analysis_for_defid(def_id);
             }
         }
     }

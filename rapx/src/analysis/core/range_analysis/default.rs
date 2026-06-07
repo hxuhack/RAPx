@@ -329,7 +329,7 @@ where
         if self.tcx.is_mir_available(def_id) {
             let mut body = self.tcx.optimized_mir(def_id).clone();
             let body_mut_ref = unsafe { &mut *(&mut body as *mut Body<'tcx>) };
-            let path_analyzer = PathAnalyzer::new(self.tcx, self.debug);
+            let mut path_analyzer = PathAnalyzer::new(self.tcx, self.debug);
             let paths = path_analyzer.start_path_analysis_for_defid(def_id)?;
 
             let mut cg: ConstraintGraph<'tcx, T> =
@@ -358,7 +358,7 @@ where
         }
     }
     pub fn start_path_constraints_analysis(&mut self) {
-        let path_analyzer = PathAnalyzer::new(self.tcx, self.debug);
+        let mut path_analyzer = PathAnalyzer::new(self.tcx, self.debug);
         for local_def_id in self.tcx.iter_local_def_id() {
             if matches!(self.tcx.def_kind(local_def_id), DefKind::Fn) {
                 let def_id = local_def_id.to_def_id();
