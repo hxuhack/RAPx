@@ -73,7 +73,11 @@ pub fn analyze_scc_regions(successors: &[Vec<usize>]) -> (Vec<SccInfo>, FxHashMa
     for mut component in collector.components {
         component.sort_unstable();
         let enter = component[0];
-        let has_self_edge = component.len() == 1 && successors[enter].iter().any(|&next| next == enter);
+        let has_self_edge = component.len() == 1
+            && successors
+                .get(enter)
+                .map(|nexts| nexts.iter().any(|&next| next == enter))
+                .unwrap_or(false);
         if component.len() <= 1 && !has_self_edge {
             continue;
         }
@@ -85,7 +89,10 @@ pub fn analyze_scc_regions(successors: &[Vec<usize>]) -> (Vec<SccInfo>, FxHashMa
         }
 
         for &node in &component {
-            for &next in &successors[node] {
+            let Some(nexts) = successors.get(node) else {
+                continue;
+            };
+            for &next in nexts {
                 if members.contains(&next) {
                     if next <= node || next == enter {
                         scc_info.backedges.insert((node, next));
