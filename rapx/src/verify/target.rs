@@ -371,7 +371,7 @@ impl<'tcx> PrepareTargets<'tcx> {
                 .collect();
             rap_info!(
                 "      SCC bb{}: body={:?}, exits={:?}",
-                scc_info.representative.as_usize(),
+                scc_info.enter.as_usize(),
                 body,
                 exits
             );
@@ -397,11 +397,11 @@ impl<'tcx> PrepareTargets<'tcx> {
             for (path_idx, path) in callsite_paths.iter().enumerate() {
                 let kind = match path.start {
                     PathStart::FunctionEntry => "entry",
-                    PathStart::SccRepresentative { representative } => {
+                    PathStart::SccEnter { enter } => {
                         rap_info!(
-                            "      path {} kind: scc-representative(bb{})",
+                            "      path {} kind: scc-enter(bb{})",
                             path_idx,
-                            representative.as_usize()
+                            enter.as_usize()
                         );
                         rap_info!("      path {}: {}", path_idx, path.describe());
                         continue;

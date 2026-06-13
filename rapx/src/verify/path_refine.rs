@@ -585,16 +585,16 @@ fn same_path_step(lhs: &PathStep, rhs: &PathStep) -> bool {
         (PathStep::Block(lhs), PathStep::Block(rhs)) => lhs == rhs,
         (
             PathStep::SccExit {
-                representative: lhs_representative,
+                enter: lhs_enter,
                 from: lhs_from,
                 to: lhs_to,
             },
             PathStep::SccExit {
-                representative: rhs_representative,
+                enter: rhs_enter,
                 from: rhs_from,
                 to: rhs_to,
             },
-        ) => lhs_representative == rhs_representative && lhs_from == rhs_from && lhs_to == rhs_to,
+        ) => lhs_enter == rhs_enter && lhs_from == rhs_from && lhs_to == rhs_to,
         (PathStep::Callsite(lhs), PathStep::Callsite(rhs)) => lhs == rhs,
         _ => false,
     }
@@ -603,8 +603,8 @@ fn same_path_step(lhs: &PathStep, rhs: &PathStep) -> bool {
 fn describe_path_start(start: &super::path::PathStart) -> String {
     match start {
         super::path::PathStart::FunctionEntry => "entry".to_string(),
-        super::path::PathStart::SccRepresentative { representative } => {
-            format!("scc-representative(bb{})", representative.as_usize())
+        super::path::PathStart::SccEnter { enter } => {
+            format!("scc-enter(bb{})", enter.as_usize())
         }
     }
 }
@@ -613,12 +613,12 @@ fn describe_path_step(step: &PathStep) -> String {
     match step {
         PathStep::Block(block) => format!("bb{}", block.as_usize()),
         PathStep::SccExit {
-            representative,
+            enter,
             from,
             to,
         } => format!(
-            "SccRegion(bb{}).exit(bb{} -> bb{})",
-            representative.as_usize(),
+            "SccRegion(bb{})exit(bb{} -> bb{})",
+            enter.as_usize(),
             from.as_usize(),
             to.as_usize()
         ),

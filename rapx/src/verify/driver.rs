@@ -5,7 +5,7 @@
 //! This module keeps those pieces together for one function target and exposes
 //! callsite-level views for later backward visits, forward visits, and SMT stages.
 
-use crate::analysis::Analysis;
+use crate::analysis::{Analysis, path_analysis::default::PathAnalyzer};
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::ty::TyCtxt;
@@ -69,9 +69,14 @@ impl<'target, 'tcx> VerifyDriver<'target, 'tcx> {
         let backward_visitor = BackwardVisitor::new(self.tcx);
         let forward_visitor = ForwardVisitor::new(self.tcx);
         let smt_checker = SmtChecker::new(self.tcx);
+        let path_analyzer = PathAnalyzer::new(self.tcx, false);
 
         for view in self.iter_callsite_checks() {
             for (path_index, path) in view.paths.iter().enumerate() {
+                let raw_paths = path.concretize(self.tcx);
+                if !path_analyzer.is_path_reachable(self.target.def_id, &raw_paths) {
+                    continue;
+                }
                 for (property_index, property) in view.properties.iter().enumerate() {
                     let backward = backward_visitor.visit(view.callsite, path, property);
                     let forward = forward_visitor.visit(&backward);

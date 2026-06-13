@@ -72,8 +72,8 @@ impl SccInfo {
 /// A cyclic SCC region specialized for MIR basic blocks.
 #[derive(Clone, Debug)]
 pub struct SccRegion {
-    /// Stable representative block used as the key for this SCC region.
-    pub representative: BasicBlock,
+    /// SCC entry / header block.
+    pub enter: BasicBlock,
     /// Blocks that belong to the SCC region.
     pub blocks: Vec<BasicBlock>,
     /// Edges that leave the SCC region.
@@ -113,7 +113,7 @@ pub fn find_scc_regions(
             continue;
         }
 
-        let representative = BasicBlock::from_usize(component[0]);
+        let enter = BasicBlock::from_usize(component[0]);
         let block_set: FxHashSet<usize> = component.iter().copied().collect();
         let mut exits = Vec::new();
         let mut backedges = Vec::new();
@@ -123,7 +123,7 @@ pub fn find_scc_regions(
             for &succ in &successors[block_idx] {
                 let succ_idx = succ.as_usize();
                 if block_set.contains(&succ_idx) {
-                    if succ_idx <= block_idx || succ == representative {
+                    if succ_idx <= block_idx || succ == enter {
                         backedges.push((block, succ));
                     }
                 } else {
@@ -136,11 +136,11 @@ pub fn find_scc_regions(
         }
 
         for &block_idx in &component {
-            block_to_scc.insert(BasicBlock::from_usize(block_idx), representative);
+            block_to_scc.insert(BasicBlock::from_usize(block_idx), enter);
         }
 
         scc_regions.push(SccRegion {
-            representative,
+            enter,
             blocks: component.into_iter().map(BasicBlock::from_usize).collect(),
             exits,
             backedges,
